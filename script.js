@@ -8,11 +8,16 @@ const JITTER_DENSITY = 0.35;
 const SCENE_COUNT = 12;
 const GREEN_TRIGGER_RATIO = 0.93;
 const PHRASE_COVERAGE_STEP = 32;
-const TEXT_GREEN_HOLD_FRAMES = 60;
+const TEXT_GREEN_HOLD_FRAMES = 108;
 const TEXT_WHITE_HOLD_FRAMES = 18;
 const REORGANIZE_DURATION = 150;
-const TRANSITION_SAMPLE_STEP = 6;
-const TRANSITION_PARTICLE_LIMIT = 220000;
+const FINAL_SETTLE_OVERLAP = 28;
+const IS_MOBILE = window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+const MAX_CANVAS_WIDTH = IS_MOBILE ? 900 : 1400;
+const MAX_CANVAS_HEIGHT = IS_MOBILE ? 1200 : 1867;
+const TRANSITION_SAMPLE_STEP = IS_MOBILE ? 10 : 7;
+const TRANSITION_PARTICLE_LIMIT = IS_MOBILE ? 70000 : 130000;
+const ASSET_VERSION = "2026-05-12-perf-1";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -127,12 +132,23 @@ function resizeCanvas(width, height) {
   ctx.imageSmoothingEnabled = false;
 }
 
+function renderSizeForImage(img) {
+  const sourceWidth = img.naturalWidth || FALLBACK_WIDTH;
+  const sourceHeight = img.naturalHeight || FALLBACK_HEIGHT;
+  const scale = Math.min(MAX_CANVAS_WIDTH / sourceWidth, MAX_CANVAS_HEIGHT / sourceHeight, 1);
+
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
+  };
+}
+
 function loadImageElement(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = reject;
-    img.src = `${src}?v=${Date.now()}`;
+    img.src = `${src}?v=${ASSET_VERSION}`;
   });
 }
 
@@ -167,8 +183,7 @@ async function loadScene(sceneIndex) {
 }
 
 function applyScene(sceneIndex, ditherImg, phraseImg) {
-  const width = ditherImg.naturalWidth || FALLBACK_WIDTH;
-  const height = ditherImg.naturalHeight || FALLBACK_HEIGHT;
+  const { width, height } = renderSizeForImage(ditherImg);
 
   resizeCanvas(width, height);
   buildFixedBitmapBase(ditherImg);
@@ -184,8 +199,7 @@ function loadImage() {
   const img = new Image();
 
   img.onload = () => {
-    const width = img.naturalWidth || FALLBACK_WIDTH;
-    const height = img.naturalHeight || FALLBACK_HEIGHT;
+    const { width, height } = renderSizeForImage(img);
 
     resizeCanvas(width, height);
     buildFixedBitmapBase(img);
@@ -203,7 +217,7 @@ function loadImage() {
     state.message = "arquivo cidade-dither.png nao encontrado";
   };
 
-  img.src = `${IMAGE_SRC}?v=${Date.now()}`;
+  img.src = `${IMAGE_SRC}?v=${ASSET_VERSION}`;
 }
 
 function loadExplosionStamps() {
@@ -411,7 +425,7 @@ function buildFixedBitmapBase(img) {
 
   sourceCtx.imageSmoothingEnabled = false;
   sourceCtx.clearRect(0, 0, state.width, state.height);
-  sourceCtx.drawImage(img, 0, 0);
+  sourceCtx.drawImage(img, 0, 0, state.width, state.height);
 
   let sourcePixels;
   try {
@@ -870,6 +884,7 @@ function startSceneTransition() {
     ditherImg: null,
     phraseImg: null,
     particles: [],
+    finalCanvas: null,
     ready: false,
   };
 
@@ -881,6 +896,7 @@ function startSceneTransition() {
     transition.ditherImg = ditherImg;
     transition.phraseImg = phraseImg;
     transition.particles = buildReorganizationParticles(ditherImg, phraseImg);
+    transition.finalCanvas = buildFinalSceneCanvas(ditherImg, phraseImg);
     transition.ready = true;
   });
 }
@@ -913,6 +929,69 @@ function buildReorganizationParticles(nextDitherImg, nextPhraseImg) {
   return particles;
 }
 
+function buildFinalSceneCanvas(ditherImg, phraseImg) {
+  const { width, height } = renderSizeForImage(ditherImg);
+  const finalCanvas = document.createElement("canvas");
+  const finalCtx = finalCanvas.getContext("2d", { willReadFrequently: true });
+  const ditherCanvas = document.createElement("canvas");
+  const ditherCtx = ditherCanvas.getContext("2d", { willReadFrequently: true });
+  const phraseSource = document.createElement("canvas");
+  const phraseSourceCtx = phraseSource.getContext("2d", { willReadFrequently: true });
+
+  finalCanvas.width = width;
+  finalCanvas.height = height;
+  ditherCanvas.width = width;
+  ditherCanvas.height = height;
+  ditherCtx.imageSmoothingEnabled = false;
+  finalCtx.imageSmoothingEnabled = false;
+  ditherCtx.drawImage(ditherImg, 0, 0, width, height);
+
+  const ditherPixels = ditherCtx.getImageData(0, 0, width, height);
+  const output = finalCtx.createImageData(width, height);
+
+  for (let i = 0; i < width * height; i += 1) {
+    const pixelIndex = i * 4;
+    const white = isWhiteInk(
+      ditherPixels.data[pixelIndex],
+      ditherPixels.data[pixelIndex + 1],
+      ditherPixels.data[pixelIndex + 2],
+      ditherPixels.data[pixelIndex + 3],
+    ) ? 255 : 0;
+
+    output.data[pixelIndex] = white;
+    output.data[pixelIndex + 1] = white;
+    output.data[pixelIndex + 2] = white;
+    output.data[pixelIndex + 3] = 255;
+  }
+
+  finalCtx.putImageData(output, 0, 0);
+
+  phraseSource.width = phraseImg.naturalWidth || phraseImg.width;
+  phraseSource.height = phraseImg.naturalHeight || phraseImg.height;
+  phraseSourceCtx.imageSmoothingEnabled = false;
+  phraseSourceCtx.drawImage(phraseImg, 0, 0);
+
+  const phrasePixels = phraseSourceCtx.getImageData(0, 0, phraseSource.width, phraseSource.height);
+  const scale = Math.min(width / phraseSource.width, height / phraseSource.height);
+  const drawW = Math.round(phraseSource.width * scale);
+  const drawH = Math.round(phraseSource.height * scale);
+  const offsetX = Math.round((width - drawW) / 2);
+  const offsetY = Math.round((height - drawH) / 2);
+
+  finalCtx.fillStyle = "#000";
+  for (let y = 0; y < drawH; y += 1) {
+    for (let x = 0; x < drawW; x += 1) {
+      const sx = Math.floor((x / drawW) * phraseSource.width);
+      const sy = Math.floor((y / drawH) * phraseSource.height);
+      const sourceIndex = (sy * phraseSource.width + sx) * 4;
+      if (phrasePixels.data[sourceIndex + 3] < 40) continue;
+      finalCtx.fillRect(offsetX + x, offsetY + y, 1, 1);
+    }
+  }
+
+  return finalCanvas;
+}
+
 function collectCurrentScenePoints() {
   const points = [];
   const phrasePixels = phraseWhiteCtx.getImageData(0, 0, state.width, state.height).data;
@@ -933,8 +1012,7 @@ function collectCurrentScenePoints() {
 
 function collectNextScenePoints(ditherImg, phraseImg) {
   const points = [];
-  const width = ditherImg.naturalWidth || state.width;
-  const height = ditherImg.naturalHeight || state.height;
+  const { width, height } = renderSizeForImage(ditherImg);
   const ditherSource = document.createElement("canvas");
   const ditherSourceCtx = ditherSource.getContext("2d", { willReadFrequently: true });
   const phraseSource = document.createElement("canvas");
@@ -987,9 +1065,13 @@ function drawSceneTransition() {
   } else if (transition.ready) {
     const localFrame = transition.frame - TEXT_GREEN_HOLD_FRAMES - TEXT_WHITE_HOLD_FRAMES;
     const progress = clamp(localFrame / REORGANIZE_DURATION, 0, 1);
+    const finalOverlap = progress > 1 - FINAL_SETTLE_OVERLAP / REORGANIZE_DURATION;
 
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, state.width, state.height);
+    if (finalOverlap && transition.finalCanvas) {
+      ctx.drawImage(transition.finalCanvas, 0, 0);
+    }
     ctx.fillStyle = "#fff";
 
     for (const particle of transition.particles) {
@@ -997,6 +1079,7 @@ function drawSceneTransition() {
 
       const personalDuration = Math.max(1, particle.settleFrame - particle.startFrame);
       const t = clamp((localFrame - particle.startFrame) / personalDuration, 0, 1);
+      if (finalOverlap && t >= 0.98 && Math.random() < 0.7) continue;
       const wander = Math.sin(t * Math.PI) * (1 - t);
       const x = Math.round(lerp(particle.x, particle.tx, t) + particle.driftX * wander);
       const y = Math.round(lerp(particle.y, particle.ty, t) + particle.driftY * wander);
@@ -1147,6 +1230,9 @@ canvas.addEventListener("pointerdown", startCharge);
 canvas.addEventListener("pointermove", moveCharge);
 canvas.addEventListener("pointerup", releaseCharge);
 canvas.addEventListener("pointercancel", cancelCharge);
+canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+canvas.addEventListener("selectstart", (event) => event.preventDefault());
+canvas.addEventListener("dragstart", (event) => event.preventDefault());
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "r" || event.key === "R") reset();
