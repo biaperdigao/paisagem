@@ -12,11 +12,13 @@ const PHRASE_COVERAGE_STEP = 32;
 const TEXT_GREEN_HOLD_FRAMES = 108;
 const TEXT_WHITE_HOLD_FRAMES = 18;
 const REORGANIZE_DURATION = IS_MOBILE ? 120 : 140;
+const MOBILE_SCENE_TRIGGER_CHARGE = 0.94;
+const MOBILE_CENTER_TRIGGER_RADIUS = 0.28;
 const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
 const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
 const MAX_CANVAS_WIDTH = IS_MOBILE ? 720 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 960 : 1867;
-const ASSET_VERSION = "2026-05-12-mobile-long-fix-1";
+const ASSET_VERSION = "2026-05-12-mobile-trigger-1";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -521,7 +523,7 @@ function durationFromCharge(charge) {
 }
 
 function triggerBlast(x, y, charge) {
-  if (!state.ready) return;
+  if (!state.ready) return null;
 
   const radius = radiusFromCharge(charge);
   const duration = durationFromCharge(charge);
@@ -532,6 +534,15 @@ function triggerBlast(x, y, charge) {
   state.lastAffected = blast.affected.length;
   state.lastVariant = blast.variant;
   state.blasts.push(blast);
+
+  return blast;
+}
+
+function isNearMobileSceneTrigger(x, y) {
+  const dx = x - state.width / 2;
+  const dy = y - state.height / 2;
+  const centerRadius = Math.min(state.width, state.height) * MOBILE_CENTER_TRIGGER_RADIUS;
+  return Math.hypot(dx, dy) <= centerRadius;
 }
 
 class Blast {
@@ -849,6 +860,7 @@ function drawGreenTextInsideBlasts() {
 }
 
 function checkGreenCoverageTrigger() {
+  if (IS_MOBILE) return;
   if (state.transition || state.phraseCoverageIndices.length === 0 || state.blasts.length === 0) return;
 
   coverageCtx.clearRect(0, 0, state.coverageWidth, state.coverageHeight);
@@ -1208,8 +1220,19 @@ function releaseCharge(event) {
 
   const heldTime = performance.now() - state.charging.startTime;
   const charge = chargeFromTime(heldTime);
-  triggerBlast(state.charging.x, state.charging.y, charge);
+  const x = state.charging.x;
+  const y = state.charging.y;
+  triggerBlast(x, y, charge);
   state.charging = null;
+
+  if (
+    IS_MOBILE &&
+    charge >= MOBILE_SCENE_TRIGGER_CHARGE &&
+    isNearMobileSceneTrigger(x, y) &&
+    !state.transition
+  ) {
+    startSceneTransition();
+  }
 
   if (canvas.hasPointerCapture(event.pointerId)) {
     canvas.releasePointerCapture(event.pointerId);
