@@ -12,11 +12,11 @@ const PHRASE_COVERAGE_STEP = 32;
 const TEXT_GREEN_HOLD_FRAMES = 108;
 const TEXT_WHITE_HOLD_FRAMES = 18;
 const REORGANIZE_DURATION = IS_MOBILE ? 120 : 140;
-const REVEAL_SAMPLE_STEP = IS_MOBILE ? 4 : 3;
-const REVEAL_DOT_SIZE = 2;
+const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
+const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
 const MAX_CANVAS_WIDTH = IS_MOBILE ? 720 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 960 : 1867;
-const ASSET_VERSION = "2026-05-12-mobile-white-reveal";
+const ASSET_VERSION = "2026-05-12-mobile-fix-1";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -722,9 +722,9 @@ class Blast {
   }
 
   buildFromStamp(stamp, scale) {
-    const stampSize = this.radius * (IS_MOBILE ? 0.62 + this.charge * 0.22 : 0.82 + this.charge * 0.32);
-    const cellScale = Math.max(1, Math.round(stampSize / (IS_MOBILE ? 220 : 360)));
-    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 2600 : 9500)));
+    const stampSize = this.radius * (IS_MOBILE ? 0.74 + this.charge * 0.24 : 0.82 + this.charge * 0.32);
+    const cellScale = Math.max(1, Math.round(stampSize / (IS_MOBILE ? 260 : 360)));
+    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 5200 : 9500)));
 
     for (let i = 0; i < stamp.cells.length; i += keepEvery) {
       const cell = stamp.cells[i];
@@ -831,9 +831,15 @@ function drawGreenTextInsideBlasts() {
 
     ctx.save();
     ctx.beginPath();
+    let visibleArea = 0;
     for (const cell of blast.core) {
       if (blast.frame < cell.firstFrame || blast.frame > cell.lastFrame) continue;
+      visibleArea += cell.w * cell.h;
       ctx.rect(blast.x + cell.x, blast.y + cell.y, cell.w, cell.h);
+    }
+    if (IS_MOBILE && visibleArea < state.width * state.height * 0.006) {
+      ctx.restore();
+      continue;
     }
     ctx.clip();
     ctx.drawImage(phraseGreenCanvas, 0, 0);
