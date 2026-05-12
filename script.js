@@ -1,23 +1,22 @@
-const MIN_BLAST_RADIUS = 700;
-const MAX_BLAST_RADIUS = 3600;
+const IS_MOBILE = window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+const MIN_BLAST_RADIUS = IS_MOBILE ? 260 : 700;
+const MAX_BLAST_RADIUS = IS_MOBILE ? 1250 : 3600;
 const MAX_CHARGE_TIME = 1600;
 const MIN_BLAST_DURATION = 40;
 const MAX_BLAST_DURATION = 160;
 const RETURN_SLOWNESS = 1.25;
-const JITTER_DENSITY = 0.35;
+const JITTER_DENSITY = IS_MOBILE ? 0.16 : 0.35;
 const SCENE_COUNT = 12;
 const GREEN_TRIGGER_RATIO = 0.93;
 const PHRASE_COVERAGE_STEP = 32;
 const TEXT_GREEN_HOLD_FRAMES = 108;
 const TEXT_WHITE_HOLD_FRAMES = 18;
-const REORGANIZE_DURATION = 150;
-const FINAL_SETTLE_OVERLAP = 28;
-const IS_MOBILE = window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
-const MAX_CANVAS_WIDTH = IS_MOBILE ? 900 : 1400;
-const MAX_CANVAS_HEIGHT = IS_MOBILE ? 1200 : 1867;
-const TRANSITION_SAMPLE_STEP = IS_MOBILE ? 10 : 7;
-const TRANSITION_PARTICLE_LIMIT = IS_MOBILE ? 70000 : 130000;
-const ASSET_VERSION = "2026-05-12-perf-1";
+const REORGANIZE_DURATION = IS_MOBILE ? 120 : 140;
+const REVEAL_SAMPLE_STEP = IS_MOBILE ? 4 : 3;
+const REVEAL_DOT_SIZE = 2;
+const MAX_CANVAS_WIDTH = IS_MOBILE ? 720 : 1400;
+const MAX_CANVAS_HEIGHT = IS_MOBILE ? 960 : 1867;
+const ASSET_VERSION = "2026-05-12-mobile-white-reveal";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -231,7 +230,7 @@ function loadExplosionStamps() {
       }
     };
 
-    img.src = `${src}?v=${Date.now()}`;
+    img.src = `${src}?v=${ASSET_VERSION}`;
   }
 }
 
@@ -244,7 +243,7 @@ function loadPhraseImage() {
     state.phraseReady = true;
   };
 
-  img.src = `${PHRASE_SRC}?v=${Date.now()}`;
+  img.src = `${PHRASE_SRC}?v=${ASSET_VERSION}`;
 }
 
 function buildPhraseLayers(img) {
@@ -475,7 +474,7 @@ function collectAffectedPixels(cx, cy, radius, maxDisplacement, duration) {
   const maxX = Math.min(state.width - 1, Math.round(cx + radius));
   const minY = Math.max(0, Math.round(cy - radius));
   const maxY = Math.min(state.height - 1, Math.round(cy + radius));
-  const sampleStep = Math.max(1, Math.round(radius / 420));
+  const sampleStep = Math.max(1, Math.round(radius / (IS_MOBILE ? 220 : 420)));
 
   // So os pixels brancos locais entram no dano. Eles nao tem fisica continua:
   // recebem um deslocamento pequeno e pre-calculado para poucos frames.
@@ -526,7 +525,7 @@ function triggerBlast(x, y, charge) {
 
   const radius = radiusFromCharge(charge);
   const duration = durationFromCharge(charge);
-  const maxDisplacement = Math.round(lerp(160, 660, charge));
+  const maxDisplacement = Math.round(lerp(IS_MOBILE ? 45 : 160, IS_MOBILE ? 180 : 660, charge));
   const affected = collectAffectedPixels(x, y, radius, maxDisplacement, duration);
   const blast = new Blast(x, y, radius, duration, charge, affected);
 
@@ -723,9 +722,9 @@ class Blast {
   }
 
   buildFromStamp(stamp, scale) {
-    const stampSize = this.radius * (0.82 + this.charge * 0.32);
-    const cellScale = Math.max(1, Math.round(stampSize / 360));
-    const keepEvery = Math.max(1, Math.round(stamp.cells.length / 9500));
+    const stampSize = this.radius * (IS_MOBILE ? 0.62 + this.charge * 0.22 : 0.82 + this.charge * 0.32);
+    const cellScale = Math.max(1, Math.round(stampSize / (IS_MOBILE ? 220 : 360)));
+    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 2600 : 9500)));
 
     for (let i = 0; i < stamp.cells.length; i += keepEvery) {
       const cell = stamp.cells[i];
@@ -883,8 +882,13 @@ function startSceneTransition() {
     nextIndex,
     ditherImg: null,
     phraseImg: null,
-    particles: [],
     finalCanvas: null,
+    revealCanvas: null,
+    revealCtx: null,
+    whiteRevealCells: [],
+    blackRevealCells: [],
+    whiteRevealIndex: 0,
+    blackRevealIndex: 0,
     ready: false,
   };
 
@@ -895,38 +899,104 @@ function startSceneTransition() {
   ]).then(([ditherImg, phraseImg]) => {
     transition.ditherImg = ditherImg;
     transition.phraseImg = phraseImg;
-    transition.particles = buildReorganizationParticles(ditherImg, phraseImg);
     transition.finalCanvas = buildFinalSceneCanvas(ditherImg, phraseImg);
+    setupWhiteRevealTransition(transition);
     transition.ready = true;
   });
 }
 
-function buildReorganizationParticles(nextDitherImg, nextPhraseImg) {
-  const current = shuffle(collectCurrentScenePoints());
-  const target = shuffle(collectNextScenePoints(nextDitherImg, nextPhraseImg));
-  const total = Math.min(TRANSITION_PARTICLE_LIMIT, Math.max(current.length, target.length));
-  const particles = [];
+function setupWhiteRevealTransition(transition) {
+  const revealCanvas = document.createElement("canvas");
+  const revealCtx = revealCanvas.getContext("2d", { alpha: false });
 
-  if (current.length === 0 || target.length === 0) return particles;
+  revealCanvas.width = state.width;
+  revealCanvas.height = state.height;
+  revealCtx.imageSmoothingEnabled = false;
+  revealCtx.fillStyle = "#000";
+  revealCtx.fillRect(0, 0, state.width, state.height);
 
-  for (let i = 0; i < total; i += 1) {
-    const from = current[i % current.length];
-    const to = target[i % target.length];
+  transition.revealCanvas = revealCanvas;
+  transition.revealCtx = revealCtx;
+  transition.whiteRevealCells = buildWhiteRevealCells();
+  transition.blackRevealCells = buildBlackRevealCells(transition.finalCanvas);
+  transition.whiteRevealIndex = 0;
+  transition.blackRevealIndex = 0;
+}
 
-    particles.push({
-      x: from.x,
-      y: from.y,
-      tx: to.x,
-      ty: to.y,
-      size: to.size,
-      driftX: random(-16, 16),
-      driftY: random(-22, 22),
-      startFrame: Math.round(random(0, REORGANIZE_DURATION * 0.12)),
-      settleFrame: Math.round(random(REORGANIZE_DURATION * 0.78, REORGANIZE_DURATION)),
-    });
+function buildWhiteRevealCells() {
+  const cells = [];
+
+  for (let y = 0; y < state.height; y += REVEAL_SAMPLE_STEP) {
+    for (let x = 0; x < state.width; x += REVEAL_SAMPLE_STEP) {
+      cells.push({
+        x,
+        y,
+        w: REVEAL_DOT_SIZE,
+        h: REVEAL_DOT_SIZE,
+      });
+    }
   }
 
-  return particles;
+  return shuffle(cells);
+}
+
+function buildBlackRevealCells(finalCanvas) {
+  const finalCtx = finalCanvas.getContext("2d", { willReadFrequently: true });
+  const pixels = finalCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height).data;
+  const cells = [];
+
+  for (let y = 0; y < finalCanvas.height; y += REVEAL_SAMPLE_STEP) {
+    for (let x = 0; x < finalCanvas.width; x += REVEAL_SAMPLE_STEP) {
+      const pixelIndex = (y * finalCanvas.width + x) * 4;
+      const isBlack = pixels[pixelIndex] < 128;
+      if (!isBlack) continue;
+
+      cells.push({
+        x,
+        y,
+        w: REVEAL_DOT_SIZE,
+        h: REVEAL_DOT_SIZE,
+      });
+    }
+  }
+
+  return shuffle(cells);
+}
+
+function drawWhiteRevealTransition(transition, localFrame) {
+  const whiteDuration = Math.max(1, Math.round(REORGANIZE_DURATION * 0.5));
+  const blackDuration = Math.max(1, REORGANIZE_DURATION - whiteDuration);
+  const whiteProgress = clamp(localFrame / whiteDuration, 0, 1);
+  const whiteTargetIndex = Math.floor(transition.whiteRevealCells.length * whiteProgress);
+
+  if (transition.revealCtx && whiteTargetIndex > transition.whiteRevealIndex) {
+    transition.revealCtx.fillStyle = "#fff";
+    for (let i = transition.whiteRevealIndex; i < whiteTargetIndex; i += 1) {
+      const cell = transition.whiteRevealCells[i];
+      transition.revealCtx.fillRect(cell.x, cell.y, cell.w, cell.h);
+    }
+    transition.whiteRevealIndex = whiteTargetIndex;
+  }
+
+  if (localFrame >= whiteDuration && transition.revealCtx) {
+    const blackFrame = localFrame - whiteDuration;
+    const blackProgress = clamp(blackFrame / blackDuration, 0, 1);
+    const blackTargetIndex = Math.floor(transition.blackRevealCells.length * blackProgress);
+
+    transition.revealCtx.fillStyle = "#000";
+    for (let i = transition.blackRevealIndex; i < blackTargetIndex; i += 1) {
+      const cell = transition.blackRevealCells[i];
+      transition.revealCtx.fillRect(cell.x, cell.y, cell.w, cell.h);
+    }
+    transition.blackRevealIndex = blackTargetIndex;
+  }
+
+  if (localFrame >= REORGANIZE_DURATION - 1 && transition.finalCanvas) {
+    ctx.drawImage(transition.finalCanvas, 0, 0);
+    return;
+  }
+
+  ctx.drawImage(transition.revealCanvas, 0, 0);
 }
 
 function buildFinalSceneCanvas(ditherImg, phraseImg) {
@@ -992,67 +1062,6 @@ function buildFinalSceneCanvas(ditherImg, phraseImg) {
   return finalCanvas;
 }
 
-function collectCurrentScenePoints() {
-  const points = [];
-  const phrasePixels = phraseWhiteCtx.getImageData(0, 0, state.width, state.height).data;
-
-  for (let y = 0; y < state.height; y += TRANSITION_SAMPLE_STEP) {
-    for (let x = 0; x < state.width; x += TRANSITION_SAMPLE_STEP) {
-      const index = y * state.width + x;
-      const phraseAlpha = phrasePixels[index * 4 + 3];
-
-      if (state.whiteMask[index] !== 1 && phraseAlpha === 0) continue;
-
-      points.push({ x, y, size: Math.max(1, Math.round(TRANSITION_SAMPLE_STEP * 0.55)) });
-    }
-  }
-
-  return points;
-}
-
-function collectNextScenePoints(ditherImg, phraseImg) {
-  const points = [];
-  const { width, height } = renderSizeForImage(ditherImg);
-  const ditherSource = document.createElement("canvas");
-  const ditherSourceCtx = ditherSource.getContext("2d", { willReadFrequently: true });
-  const phraseSource = document.createElement("canvas");
-  const phraseSourceCtx = phraseSource.getContext("2d", { willReadFrequently: true });
-
-  ditherSource.width = width;
-  ditherSource.height = height;
-  phraseSource.width = width;
-  phraseSource.height = height;
-  ditherSourceCtx.imageSmoothingEnabled = false;
-  phraseSourceCtx.imageSmoothingEnabled = false;
-  ditherSourceCtx.drawImage(ditherImg, 0, 0, width, height);
-  phraseSourceCtx.drawImage(phraseImg, 0, 0, width, height);
-
-  const ditherPixels = ditherSourceCtx.getImageData(0, 0, width, height).data;
-  const phrasePixels = phraseSourceCtx.getImageData(0, 0, width, height).data;
-
-  for (let y = 0; y < height; y += TRANSITION_SAMPLE_STEP) {
-    for (let x = 0; x < width; x += TRANSITION_SAMPLE_STEP) {
-      const pixelIndex = (y * width + x) * 4;
-      const isDitherWhite = isWhiteInk(
-        ditherPixels[pixelIndex],
-        ditherPixels[pixelIndex + 1],
-        ditherPixels[pixelIndex + 2],
-        ditherPixels[pixelIndex + 3],
-      );
-      const isPhraseVisible = phrasePixels[pixelIndex + 3] > 40;
-
-      // A cena final usa a frase como recorte preto. Entao o alvo da
-      // reorganizacao nao deve desenhar a frase em branco; ele deve formar o
-      // dither ja com a area da frase vazada.
-      if (!isDitherWhite || isPhraseVisible) continue;
-
-      points.push({ x, y, size: Math.max(1, Math.round(TRANSITION_SAMPLE_STEP * 0.55)) });
-    }
-  }
-
-  return points;
-}
-
 function drawSceneTransition() {
   if (!state.transition) return;
 
@@ -1064,27 +1073,7 @@ function drawSceneTransition() {
     ctx.drawImage(phraseWhiteCanvas, 0, 0);
   } else if (transition.ready) {
     const localFrame = transition.frame - TEXT_GREEN_HOLD_FRAMES - TEXT_WHITE_HOLD_FRAMES;
-    const progress = clamp(localFrame / REORGANIZE_DURATION, 0, 1);
-    const finalOverlap = progress > 1 - FINAL_SETTLE_OVERLAP / REORGANIZE_DURATION;
-
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, state.width, state.height);
-    if (finalOverlap && transition.finalCanvas) {
-      ctx.drawImage(transition.finalCanvas, 0, 0);
-    }
-    ctx.fillStyle = "#fff";
-
-    for (const particle of transition.particles) {
-      if (particle.startFrame > localFrame) continue;
-
-      const personalDuration = Math.max(1, particle.settleFrame - particle.startFrame);
-      const t = clamp((localFrame - particle.startFrame) / personalDuration, 0, 1);
-      if (finalOverlap && t >= 0.98 && Math.random() < 0.7) continue;
-      const wander = Math.sin(t * Math.PI) * (1 - t);
-      const x = Math.round(lerp(particle.x, particle.tx, t) + particle.driftX * wander);
-      const y = Math.round(lerp(particle.y, particle.ty, t) + particle.driftY * wander);
-      ctx.fillRect(x, y, particle.size, particle.size);
-    }
+    drawWhiteRevealTransition(transition, localFrame);
   }
 
   transition.frame += 1;
@@ -1176,7 +1165,9 @@ function animate(now) {
     blast.draw();
     return blast.update();
   });
-  drawGreenTextInsideBlasts();
+  if (!state.transition) {
+    drawGreenTextInsideBlasts();
+  }
   checkGreenCoverageTrigger();
   drawSceneTransition();
   drawChargeFeedback(now);
