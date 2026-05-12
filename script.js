@@ -14,11 +14,13 @@ const TEXT_WHITE_HOLD_FRAMES = 18;
 const REORGANIZE_DURATION = IS_MOBILE ? 120 : 140;
 const MOBILE_SCENE_TRIGGER_CHARGE = 0.94;
 const MOBILE_CENTER_TRIGGER_RADIUS = 0.28;
+const MOBILE_VISUAL_CHARGE_LIMIT = 0.12;
 const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
 const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
 const MAX_CANVAS_WIDTH = IS_MOBILE ? 720 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 960 : 1867;
-const ASSET_VERSION = "2026-05-12-mobile-trigger-1";
+const MOBILE_BLAST_SPRITE_FRAMES = 6;
+const ASSET_VERSION = "2026-05-12-mobile-sprite-1";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -525,11 +527,12 @@ function durationFromCharge(charge) {
 function triggerBlast(x, y, charge) {
   if (!state.ready) return null;
 
-  const radius = radiusFromCharge(charge);
-  const duration = durationFromCharge(charge);
-  const maxDisplacement = Math.round(lerp(IS_MOBILE ? 18 : 160, IS_MOBILE ? 90 : 660, charge));
+  const visualCharge = IS_MOBILE ? Math.min(charge, MOBILE_VISUAL_CHARGE_LIMIT) : charge;
+  const radius = radiusFromCharge(visualCharge);
+  const duration = durationFromCharge(visualCharge);
+  const maxDisplacement = Math.round(lerp(IS_MOBILE ? 18 : 160, IS_MOBILE ? 90 : 660, visualCharge));
   const affected = collectAffectedPixels(x, y, radius, maxDisplacement, duration);
-  const blast = new Blast(x, y, radius, duration, charge, affected);
+  const blast = new Blast(x, y, radius, duration, visualCharge, affected);
 
   state.lastAffected = blast.affected.length;
   state.lastVariant = blast.variant;
@@ -595,6 +598,9 @@ class Blast {
     this.holes = [];
     this.shards = [];
     this.clusters = [];
+    this.mobileFrames = [];
+    this.mobileFrameX = 0;
+    this.mobileFrameY = 0;
 
     // Buracos pretos internos: preservam a linguagem xerox/reticula quebrada.
     for (let i = 0; i < Math.round((18 + 34 * densityBoost) * variantShape.holes); i += 1) {
@@ -730,6 +736,10 @@ class Blast {
       pixel.targetY = target.y + Math.round(random(0, target.h));
       pixel.restoreFrame = Math.round(random(duration * 0.52, duration * 0.96) * RETURN_SLOWNESS);
     }
+
+    if (IS_MOBILE) {
+      this.buildMobileFrames();
+    }
   }
 
   buildFromStamp(stamp, scale) {
@@ -765,11 +775,70 @@ class Blast {
   }
 
   draw() {
+    if (IS_MOBILE && this.mobileFrames.length > 0) {
+      this.drawMobileFrame();
+      return;
+    }
+
     this.eraseLocalWhitePixels();
     this.drawDisplacedPixels();
     this.drawCore();
     this.drawHoles();
     this.drawClusters();
+  }
+
+  buildMobileFrames() {
+    if (this.core.length === 0) return;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const cell of this.core) {
+      minX = Math.min(minX, cell.x);
+      minY = Math.min(minY, cell.y);
+      maxX = Math.max(maxX, cell.x + cell.w);
+      maxY = Math.max(maxY, cell.y + cell.h);
+    }
+
+    const pad = 4;
+    const width = Math.max(1, Math.ceil(maxX - minX + pad * 2));
+    const height = Math.max(1, Math.ceil(maxY - minY + pad * 2));
+    this.mobileFrameX = Math.round(minX - pad);
+    this.mobileFrameY = Math.round(minY - pad);
+
+    for (let frameIndex = 0; frameIndex < MOBILE_BLAST_SPRITE_FRAMES; frameIndex += 1) {
+      const sprite = document.createElement("canvas");
+      const spriteCtx = sprite.getContext("2d", { alpha: true });
+      const sampleFrame = Math.round((frameIndex / Math.max(1, MOBILE_BLAST_SPRITE_FRAMES - 1)) * this.duration * 0.58);
+
+      sprite.width = width;
+      sprite.height = height;
+      spriteCtx.imageSmoothingEnabled = false;
+      spriteCtx.fillStyle = "#fff";
+
+      for (const cell of this.core) {
+        if (sampleFrame < cell.firstFrame || sampleFrame > cell.lastFrame) continue;
+        spriteCtx.fillRect(
+          Math.round(cell.x - this.mobileFrameX),
+          Math.round(cell.y - this.mobileFrameY),
+          cell.w,
+          cell.h,
+        );
+      }
+
+      this.mobileFrames.push(sprite);
+    }
+  }
+
+  drawMobileFrame() {
+    const frameIndex = Math.min(
+      this.mobileFrames.length - 1,
+      Math.floor((this.frame / Math.max(1, this.duration)) * this.mobileFrames.length),
+    );
+    const sprite = this.mobileFrames[frameIndex];
+    ctx.drawImage(sprite, this.x + this.mobileFrameX, this.y + this.mobileFrameY);
   }
 
   eraseLocalWhitePixels() {
@@ -908,6 +977,7 @@ function startSceneTransition() {
     blackRevealCells: [],
     whiteRevealIndex: 0,
     blackRevealIndex: 0,
+    mobileReadablePhrase: false,
     ready: false,
   };
 
@@ -1087,7 +1157,11 @@ function drawSceneTransition() {
   const transition = state.transition;
 
   if (transition.frame < TEXT_GREEN_HOLD_FRAMES) {
-    drawGreenTextInsideBlasts();
+    if (transition.mobileReadablePhrase) {
+      ctx.drawImage(phraseGreenCanvas, 0, 0);
+    } else {
+      drawGreenTextInsideBlasts();
+    }
   } else if (transition.frame < TEXT_GREEN_HOLD_FRAMES + TEXT_WHITE_HOLD_FRAMES) {
     ctx.drawImage(phraseWhiteCanvas, 0, 0);
   } else if (transition.ready) {
@@ -1184,7 +1258,7 @@ function animate(now) {
     blast.draw();
     return blast.update();
   });
-  if (!state.transition) {
+  if (!state.transition && !IS_MOBILE) {
     drawGreenTextInsideBlasts();
   }
   checkGreenCoverageTrigger();
@@ -1232,6 +1306,9 @@ function releaseCharge(event) {
     !state.transition
   ) {
     startSceneTransition();
+    if (state.transition) {
+      state.transition.mobileReadablePhrase = true;
+    }
   }
 
   if (canvas.hasPointerCapture(event.pointerId)) {
