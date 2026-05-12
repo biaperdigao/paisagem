@@ -1,6 +1,6 @@
 const IS_MOBILE = window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
 const MIN_BLAST_RADIUS = IS_MOBILE ? 150 : 700;
-const MAX_BLAST_RADIUS = IS_MOBILE ? 820 : 3600;
+const MAX_BLAST_RADIUS = IS_MOBILE ? 620 : 3600;
 const MAX_CHARGE_TIME = 1600;
 const MIN_BLAST_DURATION = 40;
 const MAX_BLAST_DURATION = 160;
@@ -16,7 +16,7 @@ const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
 const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
 const MAX_CANVAS_WIDTH = IS_MOBILE ? 720 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 960 : 1867;
-const ASSET_VERSION = "2026-05-12-mobile-fix-2";
+const ASSET_VERSION = "2026-05-12-mobile-long-fix-1";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -722,9 +722,9 @@ class Blast {
   }
 
   buildFromStamp(stamp, scale) {
-    const stampSize = this.radius * (IS_MOBILE ? 0.58 + this.charge * 0.18 : 0.82 + this.charge * 0.32);
-    const cellScale = Math.max(1, Math.round(stampSize / (IS_MOBILE ? 420 : 360)));
-    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 6800 : 9500)));
+    const stampSize = this.radius * (IS_MOBILE ? 0.66 + this.charge * 0.1 : 0.82 + this.charge * 0.32);
+    const cellScale = Math.max(1, Math.round(stampSize / (IS_MOBILE ? 900 : 360)));
+    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 9000 : 9500)));
 
     for (let i = 0; i < stamp.cells.length; i += keepEvery) {
       const cell = stamp.cells[i];
@@ -732,7 +732,8 @@ class Blast {
 
       const x = Math.round(cell.x * stampSize);
       const y = Math.round(cell.y * stampSize);
-      const size = Math.max(2 * scale, Math.round(cell.size * stampSize) * cellScale);
+      const rawSize = Math.max(1, Math.round(cell.size * stampSize) * cellScale);
+      const size = IS_MOBILE ? clamp(rawSize, 1, 2) : Math.max(2 * scale, rawSize);
 
       this.core.push({
         x,
