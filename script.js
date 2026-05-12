@@ -1,6 +1,6 @@
 const IS_MOBILE = window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
-const MIN_BLAST_RADIUS = IS_MOBILE ? 150 : 700;
-const MAX_BLAST_RADIUS = IS_MOBILE ? 620 : 3600;
+const MIN_BLAST_RADIUS = IS_MOBILE ? 420 : 700;
+const MAX_BLAST_RADIUS = IS_MOBILE ? 1040 : 3600;
 const MAX_CHARGE_TIME = 1600;
 const MIN_BLAST_DURATION = 40;
 const MAX_BLAST_DURATION = 160;
@@ -14,13 +14,12 @@ const TEXT_WHITE_HOLD_FRAMES = 18;
 const REORGANIZE_DURATION = IS_MOBILE ? 120 : 140;
 const MOBILE_SCENE_TRIGGER_CHARGE = 0.94;
 const MOBILE_CENTER_TRIGGER_RADIUS = 0.28;
-const MOBILE_VISUAL_CHARGE_LIMIT = 0.08;
 const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
 const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
-const MAX_CANVAS_WIDTH = IS_MOBILE ? 540 : 1400;
-const MAX_CANVAS_HEIGHT = IS_MOBILE ? 720 : 1867;
-const MOBILE_BLAST_SPRITE_FRAMES = 4;
-const ASSET_VERSION = "2026-05-12-mobile-sprite-green-1";
+const MAX_CANVAS_WIDTH = IS_MOBILE ? 480 : 1400;
+const MAX_CANVAS_HEIGHT = IS_MOBILE ? 640 : 1867;
+const MOBILE_BLAST_SPRITE_FRAMES = 1;
+const ASSET_VERSION = "2026-05-12-mobile-stamp-clip-1";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -521,17 +520,20 @@ function radiusFromCharge(charge) {
 }
 
 function durationFromCharge(charge) {
+  if (IS_MOBILE) {
+    return Math.round(lerp(32, 60, charge));
+  }
   return Math.round(lerp(MIN_BLAST_DURATION, MAX_BLAST_DURATION, charge));
 }
 
 function triggerBlast(x, y, charge) {
   if (!state.ready) return null;
 
-  const visualCharge = IS_MOBILE ? Math.min(charge, MOBILE_VISUAL_CHARGE_LIMIT) : charge;
+  const visualCharge = charge;
   const radius = radiusFromCharge(visualCharge);
   const duration = durationFromCharge(visualCharge);
   const maxDisplacement = Math.round(lerp(IS_MOBILE ? 18 : 160, IS_MOBILE ? 90 : 660, visualCharge));
-  const affected = collectAffectedPixels(x, y, radius, maxDisplacement, duration);
+  const affected = IS_MOBILE ? [] : collectAffectedPixels(x, y, radius, maxDisplacement, duration);
   const blast = new Blast(x, y, radius, duration, visualCharge, affected);
 
   state.lastAffected = blast.affected.length;
@@ -814,7 +816,6 @@ class Blast {
       const spriteCtx = sprite.getContext("2d", { alpha: true });
       const greenSprite = document.createElement("canvas");
       const greenCtx = greenSprite.getContext("2d", { alpha: true });
-      const sampleFrame = Math.round((frameIndex / Math.max(1, MOBILE_BLAST_SPRITE_FRAMES - 1)) * this.duration * 0.58);
 
       sprite.width = width;
       sprite.height = height;
@@ -826,7 +827,6 @@ class Blast {
       greenCtx.fillStyle = "#fff";
 
       for (const cell of this.core) {
-        if (sampleFrame < cell.firstFrame || sampleFrame > cell.lastFrame) continue;
         const cellX = Math.round(cell.x - this.mobileFrameX);
         const cellY = Math.round(cell.y - this.mobileFrameY);
         spriteCtx.fillRect(cellX, cellY, cell.w, cell.h);
@@ -1001,6 +1001,7 @@ function startSceneTransition() {
     whiteRevealIndex: 0,
     blackRevealIndex: 0,
     mobileReadablePhrase: false,
+    mobileGreenHoldCanvas: null,
     ready: false,
   };
 
@@ -1111,6 +1112,27 @@ function drawWhiteRevealTransition(transition, localFrame) {
   ctx.drawImage(transition.revealCanvas, 0, 0);
 }
 
+function buildMobileGreenHoldCanvas() {
+  const holdCanvas = document.createElement("canvas");
+  const holdCtx = holdCanvas.getContext("2d", { alpha: true });
+
+  holdCanvas.width = state.width;
+  holdCanvas.height = state.height;
+  holdCtx.imageSmoothingEnabled = false;
+
+  for (const blast of state.blasts) {
+    if (blast.mobileGreenFrames && blast.mobileGreenFrames[0]) {
+      holdCtx.drawImage(
+        blast.mobileGreenFrames[0],
+        blast.x + blast.mobileFrameX,
+        blast.y + blast.mobileFrameY,
+      );
+    }
+  }
+
+  return holdCanvas;
+}
+
 function buildFinalSceneCanvas(ditherImg, phraseImg) {
   const { width, height } = renderSizeForImage(ditherImg);
   const finalCanvas = document.createElement("canvas");
@@ -1180,8 +1202,8 @@ function drawSceneTransition() {
   const transition = state.transition;
 
   if (transition.frame < TEXT_GREEN_HOLD_FRAMES) {
-    if (transition.mobileReadablePhrase) {
-      ctx.drawImage(phraseGreenCanvas, 0, 0);
+    if (transition.mobileReadablePhrase && transition.mobileGreenHoldCanvas) {
+      ctx.drawImage(transition.mobileGreenHoldCanvas, 0, 0);
     } else {
       drawGreenTextInsideBlasts();
     }
@@ -1331,6 +1353,7 @@ function releaseCharge(event) {
     startSceneTransition();
     if (state.transition) {
       state.transition.mobileReadablePhrase = true;
+      state.transition.mobileGreenHoldCanvas = buildMobileGreenHoldCanvas();
     }
   }
 
