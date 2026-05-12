@@ -19,7 +19,8 @@ const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
 const MAX_CANVAS_WIDTH = IS_MOBILE ? 480 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 640 : 1867;
 const MOBILE_BLAST_SPRITE_FRAMES = 1;
-const ASSET_VERSION = "2026-05-12-mobile-stamp-clip-1";
+const MOBILE_STAMP_INK_PAD = 3;
+const ASSET_VERSION = "2026-05-12-mobile-solid-stamp-2";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -748,7 +749,7 @@ class Blast {
   buildFromStamp(stamp, scale) {
     const stampSize = this.radius * (IS_MOBILE ? 0.66 + this.charge * 0.1 : 0.82 + this.charge * 0.32);
     const cellScale = Math.max(1, Math.round(stampSize / (IS_MOBILE ? 900 : 360)));
-    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 9000 : 9500)));
+    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 7000 : 9500)));
 
     for (let i = 0; i < stamp.cells.length; i += keepEvery) {
       const cell = stamp.cells[i];
@@ -757,7 +758,7 @@ class Blast {
       const x = Math.round(cell.x * stampSize);
       const y = Math.round(cell.y * stampSize);
       const rawSize = Math.max(1, Math.round(cell.size * stampSize) * cellScale);
-      const size = IS_MOBILE ? clamp(rawSize, 1, 2) : Math.max(2 * scale, rawSize);
+      const size = IS_MOBILE ? clamp(rawSize, 2, 4) : Math.max(2 * scale, rawSize);
 
       this.core.push({
         x,
@@ -805,7 +806,7 @@ class Blast {
       maxY = Math.max(maxY, cell.y + cell.h);
     }
 
-    const pad = 4;
+    const pad = IS_MOBILE ? 14 : 4;
     const width = Math.max(1, Math.ceil(maxX - minX + pad * 2));
     const height = Math.max(1, Math.ceil(maxY - minY + pad * 2));
     this.mobileFrameX = Math.round(minX - pad);
@@ -824,15 +825,25 @@ class Blast {
       spriteCtx.imageSmoothingEnabled = false;
       greenCtx.imageSmoothingEnabled = false;
       spriteCtx.fillStyle = "#fff";
-      greenCtx.fillStyle = "#fff";
 
       for (const cell of this.core) {
         const cellX = Math.round(cell.x - this.mobileFrameX);
         const cellY = Math.round(cell.y - this.mobileFrameY);
-        spriteCtx.fillRect(cellX, cellY, cell.w, cell.h);
-        greenCtx.fillRect(cellX, cellY, cell.w, cell.h);
+        const inkPad = IS_MOBILE ? MOBILE_STAMP_INK_PAD : 0;
+        spriteCtx.fillRect(
+          cellX - inkPad,
+          cellY - inkPad,
+          cell.w + inkPad * 2,
+          cell.h + inkPad * 2,
+        );
       }
 
+      if (IS_MOBILE) {
+        fillMobileStampBody(spriteCtx, width, height, this.charge);
+        thickenStampSprite(sprite, spriteCtx);
+      }
+
+      greenCtx.drawImage(sprite, 0, 0);
       greenCtx.globalCompositeOperation = "source-in";
       greenCtx.drawImage(
         phraseGreenCanvas,
@@ -919,6 +930,55 @@ class Blast {
       if (this.frame < dot.firstFrame || this.frame > dot.lastFrame) continue;
       ctx.fillRect(this.x + dot.x, this.y + dot.y, dot.w, dot.h);
     }
+  }
+}
+
+function thickenStampSprite(sprite, spriteCtx) {
+  const copy = document.createElement("canvas");
+  const copyCtx = copy.getContext("2d", { alpha: true });
+  const offsets = [
+    [-2, 0],
+    [2, 0],
+    [0, -2],
+    [0, 2],
+    [-2, -2],
+    [2, -2],
+    [-2, 2],
+    [2, 2],
+  ];
+
+  copy.width = sprite.width;
+  copy.height = sprite.height;
+  copyCtx.imageSmoothingEnabled = false;
+  copyCtx.drawImage(sprite, 0, 0);
+
+  for (const [dx, dy] of offsets) {
+    spriteCtx.drawImage(copy, dx, dy);
+  }
+}
+
+function fillMobileStampBody(spriteCtx, width, height, charge) {
+  const cx = Math.round(width * 0.5);
+  const cy = Math.round(height * 0.52);
+  const rx = Math.round(width * lerp(0.27, 0.36, charge));
+  const ry = Math.round(height * lerp(0.2, 0.28, charge));
+  const step = 4;
+
+  spriteCtx.fillStyle = "#fff";
+  for (let y = -ry; y <= ry; y += step) {
+    const normalizedY = y / ry;
+    const band = Math.sqrt(Math.max(0, 1 - normalizedY * normalizedY));
+    const tear = 0.86 + 0.12 * Math.sin(y * 0.17) + 0.08 * Math.sin(y * 0.41);
+    const halfWidth = Math.round(rx * band * tear);
+    const jagLeft = Math.round(6 * Math.sin(y * 0.23) + 3 * Math.sin(y * 0.61));
+    const jagRight = Math.round(7 * Math.sin(y * 0.19 + 1.8) + 4 * Math.sin(y * 0.47));
+
+    spriteCtx.fillRect(
+      cx - halfWidth + jagLeft,
+      cy + y,
+      Math.max(step, halfWidth * 2 + jagRight - jagLeft),
+      step,
+    );
   }
 }
 
