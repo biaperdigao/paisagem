@@ -14,13 +14,13 @@ const TEXT_WHITE_HOLD_FRAMES = 18;
 const REORGANIZE_DURATION = IS_MOBILE ? 120 : 140;
 const MOBILE_SCENE_TRIGGER_CHARGE = 0.94;
 const MOBILE_CENTER_TRIGGER_RADIUS = 0.28;
-const MOBILE_VISUAL_CHARGE_LIMIT = 0.12;
+const MOBILE_VISUAL_CHARGE_LIMIT = 0.08;
 const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
 const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
-const MAX_CANVAS_WIDTH = IS_MOBILE ? 720 : 1400;
-const MAX_CANVAS_HEIGHT = IS_MOBILE ? 960 : 1867;
-const MOBILE_BLAST_SPRITE_FRAMES = 6;
-const ASSET_VERSION = "2026-05-12-mobile-sprite-1";
+const MAX_CANVAS_WIDTH = IS_MOBILE ? 540 : 1400;
+const MAX_CANVAS_HEIGHT = IS_MOBILE ? 720 : 1867;
+const MOBILE_BLAST_SPRITE_FRAMES = 4;
+const ASSET_VERSION = "2026-05-12-mobile-sprite-green-1";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -599,6 +599,7 @@ class Blast {
     this.shards = [];
     this.clusters = [];
     this.mobileFrames = [];
+    this.mobileGreenFrames = [];
     this.mobileFrameX = 0;
     this.mobileFrameY = 0;
 
@@ -811,24 +812,43 @@ class Blast {
     for (let frameIndex = 0; frameIndex < MOBILE_BLAST_SPRITE_FRAMES; frameIndex += 1) {
       const sprite = document.createElement("canvas");
       const spriteCtx = sprite.getContext("2d", { alpha: true });
+      const greenSprite = document.createElement("canvas");
+      const greenCtx = greenSprite.getContext("2d", { alpha: true });
       const sampleFrame = Math.round((frameIndex / Math.max(1, MOBILE_BLAST_SPRITE_FRAMES - 1)) * this.duration * 0.58);
 
       sprite.width = width;
       sprite.height = height;
+      greenSprite.width = width;
+      greenSprite.height = height;
       spriteCtx.imageSmoothingEnabled = false;
+      greenCtx.imageSmoothingEnabled = false;
       spriteCtx.fillStyle = "#fff";
+      greenCtx.fillStyle = "#fff";
 
       for (const cell of this.core) {
         if (sampleFrame < cell.firstFrame || sampleFrame > cell.lastFrame) continue;
-        spriteCtx.fillRect(
-          Math.round(cell.x - this.mobileFrameX),
-          Math.round(cell.y - this.mobileFrameY),
-          cell.w,
-          cell.h,
-        );
+        const cellX = Math.round(cell.x - this.mobileFrameX);
+        const cellY = Math.round(cell.y - this.mobileFrameY);
+        spriteCtx.fillRect(cellX, cellY, cell.w, cell.h);
+        greenCtx.fillRect(cellX, cellY, cell.w, cell.h);
       }
 
+      greenCtx.globalCompositeOperation = "source-in";
+      greenCtx.drawImage(
+        phraseGreenCanvas,
+        Math.round(this.x + this.mobileFrameX),
+        Math.round(this.y + this.mobileFrameY),
+        width,
+        height,
+        0,
+        0,
+        width,
+        height,
+      );
+      greenCtx.globalCompositeOperation = "source-over";
+
       this.mobileFrames.push(sprite);
+      this.mobileGreenFrames.push(greenSprite);
     }
   }
 
@@ -839,6 +859,9 @@ class Blast {
     );
     const sprite = this.mobileFrames[frameIndex];
     ctx.drawImage(sprite, this.x + this.mobileFrameX, this.y + this.mobileFrameY);
+    if (this.mobileGreenFrames[frameIndex]) {
+      ctx.drawImage(this.mobileGreenFrames[frameIndex], this.x + this.mobileFrameX, this.y + this.mobileFrameY);
+    }
   }
 
   eraseLocalWhitePixels() {
