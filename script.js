@@ -1,6 +1,6 @@
 const IS_MOBILE = window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
-const MIN_BLAST_RADIUS = IS_MOBILE ? 260 : 700;
-const MAX_BLAST_RADIUS = IS_MOBILE ? 1250 : 3600;
+const MIN_BLAST_RADIUS = IS_MOBILE ? 150 : 700;
+const MAX_BLAST_RADIUS = IS_MOBILE ? 820 : 3600;
 const MAX_CHARGE_TIME = 1600;
 const MIN_BLAST_DURATION = 40;
 const MAX_BLAST_DURATION = 160;
@@ -16,7 +16,7 @@ const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
 const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
 const MAX_CANVAS_WIDTH = IS_MOBILE ? 720 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 960 : 1867;
-const ASSET_VERSION = "2026-05-12-mobile-fix-1";
+const ASSET_VERSION = "2026-05-12-mobile-fix-2";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -498,7 +498,7 @@ function collectAffectedPixels(cx, cy, radius, maxDisplacement, duration) {
         y,
         dx: Math.round(Math.cos(angle) * displacement),
         dy: Math.round(Math.sin(angle) * displacement),
-        size: (Math.random() < 0.82 ? 1 : 2) * sampleStep,
+        size: IS_MOBILE ? 1 : (Math.random() < 0.82 ? 1 : 2) * sampleStep,
         phaseOffset: Math.round(random(0, 4)),
         restoreFrame: Math.round(random(restoreStart, restoreEnd) * RETURN_SLOWNESS),
       });
@@ -525,7 +525,7 @@ function triggerBlast(x, y, charge) {
 
   const radius = radiusFromCharge(charge);
   const duration = durationFromCharge(charge);
-  const maxDisplacement = Math.round(lerp(IS_MOBILE ? 45 : 160, IS_MOBILE ? 180 : 660, charge));
+  const maxDisplacement = Math.round(lerp(IS_MOBILE ? 18 : 160, IS_MOBILE ? 90 : 660, charge));
   const affected = collectAffectedPixels(x, y, radius, maxDisplacement, duration);
   const blast = new Blast(x, y, radius, duration, charge, affected);
 
@@ -722,9 +722,9 @@ class Blast {
   }
 
   buildFromStamp(stamp, scale) {
-    const stampSize = this.radius * (IS_MOBILE ? 0.74 + this.charge * 0.24 : 0.82 + this.charge * 0.32);
-    const cellScale = Math.max(1, Math.round(stampSize / (IS_MOBILE ? 260 : 360)));
-    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 5200 : 9500)));
+    const stampSize = this.radius * (IS_MOBILE ? 0.58 + this.charge * 0.18 : 0.82 + this.charge * 0.32);
+    const cellScale = Math.max(1, Math.round(stampSize / (IS_MOBILE ? 420 : 360)));
+    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 6800 : 9500)));
 
     for (let i = 0; i < stamp.cells.length; i += keepEvery) {
       const cell = stamp.cells[i];
