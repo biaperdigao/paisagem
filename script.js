@@ -7,11 +7,16 @@ const MAX_BLAST_DURATION = 160;
 const RETURN_SLOWNESS = 1.25;
 const JITTER_DENSITY = IS_MOBILE ? 0.16 : 0.35;
 const SCENE_COUNT = 12;
-const GREEN_TRIGGER_RATIO = 0.93;
+const GREEN_TRIGGER_RATIO = 0.95;
 const PHRASE_COVERAGE_STEP = 32;
-const TEXT_GREEN_HOLD_FRAMES = 108;
-const TEXT_WHITE_HOLD_FRAMES = 18;
-const REORGANIZE_DURATION = IS_MOBILE ? 120 : 140;
+const TEXT_GREEN_HOLD_FRAMES = 360;
+const TEXT_WHITE_HOLD_FRAMES = 0;
+const DESKTOP_FADE_OUT_FRAMES = TEXT_GREEN_HOLD_FRAMES;
+const DESKTOP_BLACK_PAUSE_FRAMES = 18;
+const DESKTOP_FADE_IN_FRAMES = 60;
+const REORGANIZE_DURATION = IS_MOBILE ? 120 : DESKTOP_FADE_OUT_FRAMES + DESKTOP_BLACK_PAUSE_FRAMES + DESKTOP_FADE_IN_FRAMES;
+const DESKTOP_DISSOLVE_STEP = 5;
+const DESKTOP_DISSOLVE_DOT_SIZE = 2;
 const MOBILE_SCENE_TRIGGER_CHARGE = 0.94;
 const MOBILE_CENTER_TRIGGER_RADIUS = 0.28;
 const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
@@ -20,7 +25,7 @@ const MAX_CANVAS_WIDTH = IS_MOBILE ? 480 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 640 : 1867;
 const MOBILE_BLAST_SPRITE_FRAMES = 1;
 const MOBILE_STAMP_INK_PAD = 3;
-const ASSET_VERSION = "2026-05-12-mobile-solid-stamp-2";
+const ASSET_VERSION = "2026-05-12-dissolve-rollback-1";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -74,7 +79,7 @@ const state = {
   blasts: [],
   debug: false,
   ready: false,
-  message: "carregando cidade-dither.png",
+  message: "abrindo a janela",
   lastAffected: 0,
   lastVariant: "",
   stamps: [],
@@ -168,7 +173,7 @@ function nextSceneIndex() {
 async function loadScene(sceneIndex) {
   const scene = SCENES[sceneIndex];
   state.ready = false;
-  state.message = `carregando cena ${sceneIndex + 1}`;
+  state.message = "abrindo a janela";
 
   try {
     const [ditherImg, phraseImg] = await Promise.all([
@@ -522,7 +527,7 @@ function radiusFromCharge(charge) {
 
 function durationFromCharge(charge) {
   if (IS_MOBILE) {
-    return Math.round(lerp(32, 60, charge));
+    return 96;
   }
   return Math.round(lerp(MIN_BLAST_DURATION, MAX_BLAST_DURATION, charge));
 }
@@ -749,7 +754,7 @@ class Blast {
   buildFromStamp(stamp, scale) {
     const stampSize = this.radius * (IS_MOBILE ? 0.66 + this.charge * 0.1 : 0.82 + this.charge * 0.32);
     const cellScale = Math.max(1, Math.round(stampSize / (IS_MOBILE ? 900 : 360)));
-    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 7000 : 9500)));
+    const keepEvery = Math.max(1, Math.round(stamp.cells.length / (IS_MOBILE ? 7000 : 14000)));
 
     for (let i = 0; i < stamp.cells.length; i += keepEvery) {
       const cell = stamp.cells[i];
@@ -758,7 +763,7 @@ class Blast {
       const x = Math.round(cell.x * stampSize);
       const y = Math.round(cell.y * stampSize);
       const rawSize = Math.max(1, Math.round(cell.size * stampSize) * cellScale);
-      const size = IS_MOBILE ? clamp(rawSize, 2, 4) : Math.max(2 * scale, rawSize);
+      const size = IS_MOBILE ? clamp(rawSize, 2, 4) : Math.max(3 * scale, rawSize + scale);
 
       this.core.push({
         x,
@@ -770,7 +775,35 @@ class Blast {
       });
     }
 
+    if (!IS_MOBILE) {
+      this.addDesktopStampBody(stampSize, scale);
+    }
+
     this.holes = [];
+  }
+
+  addDesktopStampBody(stampSize, scale) {
+    const rx = Math.round(stampSize * lerp(0.18, 0.25, this.charge));
+    const ry = Math.round(stampSize * lerp(0.13, 0.19, this.charge));
+    const step = Math.max(3 * scale, Math.round(stampSize / 170));
+
+    for (let y = -ry; y <= ry; y += step) {
+      const normalizedY = y / ry;
+      const band = Math.sqrt(Math.max(0, 1 - normalizedY * normalizedY));
+      const tear = 0.82 + 0.1 * Math.sin(y * 0.11) + 0.08 * Math.sin(y * 0.31);
+      const halfWidth = Math.round(rx * band * tear);
+      const jagLeft = Math.round(step * 1.4 * Math.sin(y * 0.17));
+      const jagRight = Math.round(step * 1.8 * Math.sin(y * 0.13 + 1.5));
+
+      this.core.push({
+        x: -halfWidth + jagLeft,
+        y,
+        w: Math.max(step, halfWidth * 2 + jagRight - jagLeft),
+        h: step,
+        firstFrame: 0,
+        lastFrame: Math.round(this.duration * 0.74),
+      });
+    }
   }
 
   update() {
@@ -1060,10 +1093,17 @@ function startSceneTransition() {
     blackRevealCells: [],
     whiteRevealIndex: 0,
     blackRevealIndex: 0,
+    currentDissolvePoints: [],
+    nextDissolvePoints: [],
     mobileReadablePhrase: false,
     mobileGreenHoldCanvas: null,
+    greenHoldCanvas: null,
+    blastHoldCanvas: null,
     ready: false,
   };
+
+  transition.greenHoldCanvas = buildGreenHoldCanvas();
+  transition.blastHoldCanvas = buildBlastHoldCanvas();
 
   state.transition = transition;
   Promise.all([
@@ -1073,7 +1113,11 @@ function startSceneTransition() {
     transition.ditherImg = ditherImg;
     transition.phraseImg = phraseImg;
     transition.finalCanvas = buildFinalSceneCanvas(ditherImg, phraseImg);
-    setupWhiteRevealTransition(transition);
+    if (IS_MOBILE) {
+      setupWhiteRevealTransition(transition);
+    } else {
+      setupDesktopDissolveTransition(transition);
+    }
     transition.ready = true;
   });
 }
@@ -1172,7 +1216,108 @@ function drawWhiteRevealTransition(transition, localFrame) {
   ctx.drawImage(transition.revealCanvas, 0, 0);
 }
 
-function buildMobileGreenHoldCanvas() {
+function setupDesktopDissolveTransition(transition) {
+  transition.currentDissolvePoints = shuffle(collectCurrentDissolvePoints());
+  transition.nextDissolvePoints = shuffle(collectTargetDissolvePoints(transition.finalCanvas));
+}
+
+function collectCurrentDissolvePoints() {
+  const points = [];
+
+  for (let y = 0; y < state.height; y += DESKTOP_DISSOLVE_STEP) {
+    for (let x = 0; x < state.width; x += DESKTOP_DISSOLVE_STEP) {
+      if (state.whiteMask[y * state.width + x] !== 1) continue;
+      points.push({ x, y, size: DESKTOP_DISSOLVE_DOT_SIZE });
+    }
+  }
+
+  return points;
+}
+
+function collectTargetDissolvePoints(finalCanvas) {
+  const finalCtx = finalCanvas.getContext("2d", { willReadFrequently: true });
+  const pixels = finalCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height).data;
+  const points = [];
+
+  for (let y = 0; y < finalCanvas.height; y += DESKTOP_DISSOLVE_STEP) {
+    for (let x = 0; x < finalCanvas.width; x += DESKTOP_DISSOLVE_STEP) {
+      const pixelIndex = (y * finalCanvas.width + x) * 4;
+      if (pixels[pixelIndex] < 128) continue;
+      points.push({ x, y, size: DESKTOP_DISSOLVE_DOT_SIZE });
+    }
+  }
+
+  return points;
+}
+
+function drawDesktopDissolveTransition(transition, localFrame) {
+  if (localFrame >= REORGANIZE_DURATION - 1 && transition.finalCanvas) {
+    ctx.drawImage(transition.finalCanvas, 0, 0);
+    return;
+  }
+
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, state.width, state.height);
+
+  if (localFrame < DESKTOP_FADE_OUT_FRAMES) {
+    const progress = clamp(localFrame / DESKTOP_FADE_OUT_FRAMES, 0, 1);
+    const visibleCount = Math.floor(transition.currentDissolvePoints.length * (1 - progress));
+    ctx.fillStyle = "#fff";
+    drawDissolvePoints(transition.currentDissolvePoints, visibleCount);
+    if (transition.blastHoldCanvas) {
+      ctx.drawImage(transition.blastHoldCanvas, 0, 0);
+    }
+    if (transition.greenHoldCanvas) {
+      ctx.drawImage(transition.greenHoldCanvas, 0, 0);
+    }
+    return;
+  }
+
+  if (localFrame < DESKTOP_FADE_OUT_FRAMES + DESKTOP_BLACK_PAUSE_FRAMES) return;
+
+  const appearFrame = localFrame - DESKTOP_FADE_OUT_FRAMES - DESKTOP_BLACK_PAUSE_FRAMES;
+  const progress = clamp(appearFrame / DESKTOP_FADE_IN_FRAMES, 0, 1);
+  const visibleCount = Math.floor(transition.nextDissolvePoints.length * progress);
+  ctx.fillStyle = "#fff";
+  drawDissolvePoints(transition.nextDissolvePoints, visibleCount);
+}
+
+function drawDissolvePoints(points, count) {
+  for (let i = 0; i < count; i += 1) {
+    const point = points[i];
+    ctx.fillRect(point.x, point.y, point.size, point.size);
+  }
+}
+
+function buildBlastHoldCanvas() {
+  const holdCanvas = document.createElement("canvas");
+  const holdCtx = holdCanvas.getContext("2d", { alpha: true });
+
+  holdCanvas.width = state.width;
+  holdCanvas.height = state.height;
+  holdCtx.imageSmoothingEnabled = false;
+  holdCtx.fillStyle = "#fff";
+
+  for (const blast of state.blasts) {
+    if (blast.mobileFrames && blast.mobileFrames[0]) {
+      holdCtx.drawImage(
+        blast.mobileFrames[0],
+        blast.x + blast.mobileFrameX,
+        blast.y + blast.mobileFrameY,
+      );
+      continue;
+    }
+
+    for (const cell of blast.core) {
+      if (blast.frame < cell.firstFrame || blast.frame > cell.lastFrame) continue;
+      holdCtx.fillRect(blast.x + cell.x, blast.y + cell.y, cell.w, cell.h);
+    }
+  }
+
+  return holdCanvas;
+}
+
+function buildGreenHoldCanvas() {
   const holdCanvas = document.createElement("canvas");
   const holdCtx = holdCanvas.getContext("2d", { alpha: true });
 
@@ -1187,7 +1332,18 @@ function buildMobileGreenHoldCanvas() {
         blast.x + blast.mobileFrameX,
         blast.y + blast.mobileFrameY,
       );
+      continue;
     }
+
+    holdCtx.save();
+    holdCtx.beginPath();
+    for (const cell of blast.core) {
+      if (blast.frame < cell.firstFrame || blast.frame > cell.lastFrame) continue;
+      holdCtx.rect(blast.x + cell.x, blast.y + cell.y, cell.w, cell.h);
+    }
+    holdCtx.clip();
+    holdCtx.drawImage(phraseGreenCanvas, 0, 0);
+    holdCtx.restore();
   }
 
   return holdCanvas;
@@ -1261,17 +1417,18 @@ function drawSceneTransition() {
 
   const transition = state.transition;
 
-  if (transition.frame < TEXT_GREEN_HOLD_FRAMES) {
-    if (transition.mobileReadablePhrase && transition.mobileGreenHoldCanvas) {
-      ctx.drawImage(transition.mobileGreenHoldCanvas, 0, 0);
-    } else {
-      drawGreenTextInsideBlasts();
-    }
-  } else if (transition.frame < TEXT_GREEN_HOLD_FRAMES + TEXT_WHITE_HOLD_FRAMES) {
-    ctx.drawImage(phraseWhiteCanvas, 0, 0);
+  if (!IS_MOBILE && transition.frame < TEXT_GREEN_HOLD_FRAMES) {
+    drawDesktopDissolveTransition(transition, transition.frame);
+  } else if (transition.frame < TEXT_GREEN_HOLD_FRAMES) {
+    if (transition.greenHoldCanvas) ctx.drawImage(transition.greenHoldCanvas, 0, 0);
+    else drawGreenTextInsideBlasts();
   } else if (transition.ready) {
-    const localFrame = transition.frame - TEXT_GREEN_HOLD_FRAMES - TEXT_WHITE_HOLD_FRAMES;
-    drawWhiteRevealTransition(transition, localFrame);
+    const localFrame = transition.frame - TEXT_GREEN_HOLD_FRAMES;
+    if (IS_MOBILE) {
+      drawWhiteRevealTransition(transition, localFrame);
+    } else {
+      drawDesktopDissolveTransition(transition, transition.frame);
+    }
   }
 
   transition.frame += 1;
@@ -1413,7 +1570,7 @@ function releaseCharge(event) {
     startSceneTransition();
     if (state.transition) {
       state.transition.mobileReadablePhrase = true;
-      state.transition.mobileGreenHoldCanvas = buildMobileGreenHoldCanvas();
+      state.transition.greenHoldCanvas = buildGreenHoldCanvas();
     }
   }
 
