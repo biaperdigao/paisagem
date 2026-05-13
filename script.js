@@ -8,24 +8,33 @@ const RETURN_SLOWNESS = 1.25;
 const JITTER_DENSITY = IS_MOBILE ? 0.16 : 0.35;
 const SCENE_COUNT = 12;
 const GREEN_TRIGGER_RATIO = 0.95;
-const PHRASE_COVERAGE_STEP = 32;
+const PHRASE_COVERAGE_STEP = 12;
 const TEXT_GREEN_HOLD_FRAMES = 360;
 const TEXT_WHITE_HOLD_FRAMES = 0;
 const DESKTOP_FADE_OUT_FRAMES = TEXT_GREEN_HOLD_FRAMES;
 const DESKTOP_BLACK_PAUSE_FRAMES = 18;
 const DESKTOP_FADE_IN_FRAMES = 60;
-const REORGANIZE_DURATION = IS_MOBILE ? 120 : DESKTOP_FADE_OUT_FRAMES + DESKTOP_BLACK_PAUSE_FRAMES + DESKTOP_FADE_IN_FRAMES;
+const MOBILE_FADE_OUT_FRAMES = TEXT_GREEN_HOLD_FRAMES;
+const MOBILE_BLACK_PAUSE_FRAMES = 18;
+const MOBILE_FADE_IN_FRAMES = 60;
+const REORGANIZE_DURATION = IS_MOBILE
+  ? MOBILE_FADE_OUT_FRAMES + MOBILE_BLACK_PAUSE_FRAMES + MOBILE_FADE_IN_FRAMES
+  : DESKTOP_FADE_OUT_FRAMES + DESKTOP_BLACK_PAUSE_FRAMES + DESKTOP_FADE_IN_FRAMES;
 const DESKTOP_DISSOLVE_STEP = 5;
 const DESKTOP_DISSOLVE_DOT_SIZE = 2;
+const MOBILE_DISSOLVE_STEP = 4;
+const MOBILE_DISSOLVE_DOT_SIZE = 1;
 const MOBILE_SCENE_TRIGGER_CHARGE = 0.94;
 const MOBILE_CENTER_TRIGGER_RADIUS = 0.28;
+const DESKTOP_SCENE_TRIGGER_CHARGE = 0.9;
+const DESKTOP_CENTER_TRIGGER_RADIUS = 0.34;
 const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
 const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
 const MAX_CANVAS_WIDTH = IS_MOBILE ? 480 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 640 : 1867;
 const MOBILE_BLAST_SPRITE_FRAMES = 1;
 const MOBILE_STAMP_INK_PAD = 3;
-const ASSET_VERSION = "2026-05-12-dissolve-rollback-1";
+const ASSET_VERSION = "2026-05-13-unified-dissolve-mobile-1";
 
 const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
@@ -335,10 +344,22 @@ function buildPhraseCoverageMap(layer) {
 
   for (let gy = 0; gy < state.coverageHeight; gy += 1) {
     for (let gx = 0; gx < state.coverageWidth; gx += 1) {
-      const x = Math.min(state.width - 1, gx * PHRASE_COVERAGE_STEP);
-      const y = Math.min(state.height - 1, gy * PHRASE_COVERAGE_STEP);
-      const alpha = layer.data[(y * state.width + x) * 4 + 3];
-      if (alpha > 0) {
+      let hasPhrasePixel = false;
+      const startX = gx * PHRASE_COVERAGE_STEP;
+      const startY = gy * PHRASE_COVERAGE_STEP;
+      const endX = Math.min(state.width, startX + PHRASE_COVERAGE_STEP);
+      const endY = Math.min(state.height, startY + PHRASE_COVERAGE_STEP);
+
+      for (let y = startY; y < endY && !hasPhrasePixel; y += 1) {
+        for (let x = startX; x < endX; x += 1) {
+          if (layer.data[(y * state.width + x) * 4 + 3] > 0) {
+            hasPhrasePixel = true;
+            break;
+          }
+        }
+      }
+
+      if (hasPhrasePixel) {
         state.phraseCoverageIndices.push(gy * state.coverageWidth + gx);
       }
     }
@@ -553,6 +574,13 @@ function isNearMobileSceneTrigger(x, y) {
   const dx = x - state.width / 2;
   const dy = y - state.height / 2;
   const centerRadius = Math.min(state.width, state.height) * MOBILE_CENTER_TRIGGER_RADIUS;
+  return Math.hypot(dx, dy) <= centerRadius;
+}
+
+function isNearDesktopSceneTrigger(x, y) {
+  const dx = x - state.width / 2;
+  const dy = y - state.height / 2;
+  const centerRadius = Math.min(state.width, state.height) * DESKTOP_CENTER_TRIGGER_RADIUS;
   return Math.hypot(dx, dy) <= centerRadius;
 }
 
@@ -1045,6 +1073,9 @@ function drawGreenTextInsideBlasts() {
 }
 
 function checkGreenCoverageTrigger() {
+  // Desktop e mobile agora usam o mesmo gesto: clique longo perto do centro.
+  // Isso evita falsos positivos de cobertura e impede a tela preta prematura.
+  return;
   if (IS_MOBILE) return;
   if (state.transition || state.phraseCoverageIndices.length === 0 || state.blasts.length === 0) return;
 
@@ -1082,7 +1113,7 @@ function startSceneTransition() {
   const nextIndex = nextSceneIndex();
   const transition = {
     frame: 0,
-    duration: TEXT_GREEN_HOLD_FRAMES + TEXT_WHITE_HOLD_FRAMES + REORGANIZE_DURATION,
+    duration: REORGANIZE_DURATION,
     nextIndex,
     ditherImg: null,
     phraseImg: null,
@@ -1095,6 +1126,9 @@ function startSceneTransition() {
     blackRevealIndex: 0,
     currentDissolvePoints: [],
     nextDissolvePoints: [],
+    dissolveCanvas: null,
+    dissolveCtx: null,
+    dissolveEraseIndex: 0,
     mobileReadablePhrase: false,
     mobileGreenHoldCanvas: null,
     greenHoldCanvas: null,
@@ -1113,11 +1147,7 @@ function startSceneTransition() {
     transition.ditherImg = ditherImg;
     transition.phraseImg = phraseImg;
     transition.finalCanvas = buildFinalSceneCanvas(ditherImg, phraseImg);
-    if (IS_MOBILE) {
-      setupWhiteRevealTransition(transition);
-    } else {
-      setupDesktopDissolveTransition(transition);
-    }
+    setupDissolveTransition(transition);
     transition.ready = true;
   });
 }
@@ -1216,7 +1246,41 @@ function drawWhiteRevealTransition(transition, localFrame) {
   ctx.drawImage(transition.revealCanvas, 0, 0);
 }
 
-function setupDesktopDissolveTransition(transition) {
+function dissolveStep() {
+  return IS_MOBILE ? MOBILE_DISSOLVE_STEP : DESKTOP_DISSOLVE_STEP;
+}
+
+function dissolveDotSize() {
+  return IS_MOBILE ? MOBILE_DISSOLVE_DOT_SIZE : DESKTOP_DISSOLVE_DOT_SIZE;
+}
+
+function fadeOutFrames() {
+  return IS_MOBILE ? MOBILE_FADE_OUT_FRAMES : DESKTOP_FADE_OUT_FRAMES;
+}
+
+function blackPauseFrames() {
+  return IS_MOBILE ? MOBILE_BLACK_PAUSE_FRAMES : DESKTOP_BLACK_PAUSE_FRAMES;
+}
+
+function fadeInFrames() {
+  return IS_MOBILE ? MOBILE_FADE_IN_FRAMES : DESKTOP_FADE_IN_FRAMES;
+}
+
+function setupDissolveTransition(transition) {
+  const dissolveCanvas = document.createElement("canvas");
+  const dissolveCtx = dissolveCanvas.getContext("2d", { alpha: false });
+
+  dissolveCanvas.width = state.width;
+  dissolveCanvas.height = state.height;
+  dissolveCtx.imageSmoothingEnabled = false;
+  dissolveCtx.drawImage(baseCanvas, 0, 0);
+  if (state.phraseReady) {
+    dissolveCtx.drawImage(phraseCanvas, 0, 0);
+  }
+
+  transition.dissolveCanvas = dissolveCanvas;
+  transition.dissolveCtx = dissolveCtx;
+  transition.dissolveEraseIndex = 0;
   transition.currentDissolvePoints = shuffle(collectCurrentDissolvePoints());
   transition.nextDissolvePoints = shuffle(collectTargetDissolvePoints(transition.finalCanvas));
 }
@@ -1224,10 +1288,13 @@ function setupDesktopDissolveTransition(transition) {
 function collectCurrentDissolvePoints() {
   const points = [];
 
-  for (let y = 0; y < state.height; y += DESKTOP_DISSOLVE_STEP) {
-    for (let x = 0; x < state.width; x += DESKTOP_DISSOLVE_STEP) {
+  const step = dissolveStep();
+  const size = dissolveDotSize();
+
+  for (let y = 0; y < state.height; y += step) {
+    for (let x = 0; x < state.width; x += step) {
       if (state.whiteMask[y * state.width + x] !== 1) continue;
-      points.push({ x, y, size: DESKTOP_DISSOLVE_DOT_SIZE });
+      points.push({ x, y, size });
     }
   }
 
@@ -1239,18 +1306,21 @@ function collectTargetDissolvePoints(finalCanvas) {
   const pixels = finalCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height).data;
   const points = [];
 
-  for (let y = 0; y < finalCanvas.height; y += DESKTOP_DISSOLVE_STEP) {
-    for (let x = 0; x < finalCanvas.width; x += DESKTOP_DISSOLVE_STEP) {
+  const step = dissolveStep();
+  const size = dissolveDotSize();
+
+  for (let y = 0; y < finalCanvas.height; y += step) {
+    for (let x = 0; x < finalCanvas.width; x += step) {
       const pixelIndex = (y * finalCanvas.width + x) * 4;
       if (pixels[pixelIndex] < 128) continue;
-      points.push({ x, y, size: DESKTOP_DISSOLVE_DOT_SIZE });
+      points.push({ x, y, size });
     }
   }
 
   return points;
 }
 
-function drawDesktopDissolveTransition(transition, localFrame) {
+function drawDissolveTransition(transition, localFrame) {
   if (localFrame >= REORGANIZE_DURATION - 1 && transition.finalCanvas) {
     ctx.drawImage(transition.finalCanvas, 0, 0);
     return;
@@ -1259,11 +1329,24 @@ function drawDesktopDissolveTransition(transition, localFrame) {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, state.width, state.height);
 
-  if (localFrame < DESKTOP_FADE_OUT_FRAMES) {
-    const progress = clamp(localFrame / DESKTOP_FADE_OUT_FRAMES, 0, 1);
-    const visibleCount = Math.floor(transition.currentDissolvePoints.length * (1 - progress));
-    ctx.fillStyle = "#fff";
-    drawDissolvePoints(transition.currentDissolvePoints, visibleCount);
+  const outFrames = fadeOutFrames();
+  const pauseFrames = blackPauseFrames();
+  const inFrames = fadeInFrames();
+
+  if (localFrame < outFrames) {
+    const progress = clamp(localFrame / outFrames, 0, 1);
+    const eraseCount = Math.floor(transition.currentDissolvePoints.length * progress);
+    if (transition.dissolveCtx && eraseCount > transition.dissolveEraseIndex) {
+      transition.dissolveCtx.fillStyle = "#000";
+      for (let i = transition.dissolveEraseIndex; i < eraseCount; i += 1) {
+        const point = transition.currentDissolvePoints[i];
+        transition.dissolveCtx.fillRect(point.x, point.y, dissolveStep(), dissolveStep());
+      }
+      transition.dissolveEraseIndex = eraseCount;
+    }
+    if (transition.dissolveCanvas) {
+      ctx.drawImage(transition.dissolveCanvas, 0, 0);
+    }
     if (transition.blastHoldCanvas) {
       ctx.drawImage(transition.blastHoldCanvas, 0, 0);
     }
@@ -1273,10 +1356,10 @@ function drawDesktopDissolveTransition(transition, localFrame) {
     return;
   }
 
-  if (localFrame < DESKTOP_FADE_OUT_FRAMES + DESKTOP_BLACK_PAUSE_FRAMES) return;
+  if (localFrame < outFrames + pauseFrames) return;
 
-  const appearFrame = localFrame - DESKTOP_FADE_OUT_FRAMES - DESKTOP_BLACK_PAUSE_FRAMES;
-  const progress = clamp(appearFrame / DESKTOP_FADE_IN_FRAMES, 0, 1);
+  const appearFrame = localFrame - outFrames - pauseFrames;
+  const progress = clamp(appearFrame / inFrames, 0, 1);
   const visibleCount = Math.floor(transition.nextDissolvePoints.length * progress);
   ctx.fillStyle = "#fff";
   drawDissolvePoints(transition.nextDissolvePoints, visibleCount);
@@ -1416,20 +1499,12 @@ function drawSceneTransition() {
   if (!state.transition) return;
 
   const transition = state.transition;
-
-  if (!IS_MOBILE && transition.frame < TEXT_GREEN_HOLD_FRAMES) {
-    drawDesktopDissolveTransition(transition, transition.frame);
-  } else if (transition.frame < TEXT_GREEN_HOLD_FRAMES) {
+  if (!transition.ready) {
     if (transition.greenHoldCanvas) ctx.drawImage(transition.greenHoldCanvas, 0, 0);
-    else drawGreenTextInsideBlasts();
-  } else if (transition.ready) {
-    const localFrame = transition.frame - TEXT_GREEN_HOLD_FRAMES;
-    if (IS_MOBILE) {
-      drawWhiteRevealTransition(transition, localFrame);
-    } else {
-      drawDesktopDissolveTransition(transition, transition.frame);
-    }
+    return;
   }
+
+  drawDissolveTransition(transition, transition.frame);
 
   transition.frame += 1;
   if (transition.frame > transition.duration && transition.ready) {
@@ -1562,9 +1637,10 @@ function releaseCharge(event) {
   state.charging = null;
 
   if (
-    IS_MOBILE &&
-    charge >= MOBILE_SCENE_TRIGGER_CHARGE &&
-    isNearMobileSceneTrigger(x, y) &&
+    (
+      (IS_MOBILE && charge >= MOBILE_SCENE_TRIGGER_CHARGE && isNearMobileSceneTrigger(x, y)) ||
+      (!IS_MOBILE && charge >= DESKTOP_SCENE_TRIGGER_CHARGE && isNearDesktopSceneTrigger(x, y))
+    ) &&
     !state.transition
   ) {
     startSceneTransition();
