@@ -9,34 +9,22 @@ const JITTER_DENSITY = IS_MOBILE ? 0.16 : 0.35;
 const SCENE_COUNT = 12;
 const GREEN_TRIGGER_RATIO = 0.95;
 const PHRASE_COVERAGE_STEP = 12;
-const TEXT_GREEN_HOLD_FRAMES = 360;
-const TEXT_WHITE_HOLD_FRAMES = 0;
+const TEXT_GREEN_HOLD_FRAMES = 420;
 const DESKTOP_FADE_OUT_FRAMES = TEXT_GREEN_HOLD_FRAMES;
-const DESKTOP_BLACK_PAUSE_FRAMES = 18;
-const DESKTOP_FADE_IN_FRAMES = 60;
 const MOBILE_FADE_OUT_FRAMES = TEXT_GREEN_HOLD_FRAMES;
-const MOBILE_BLACK_PAUSE_FRAMES = 18;
-const MOBILE_FADE_IN_FRAMES = 60;
 const REORGANIZE_DURATION = IS_MOBILE
-  ? MOBILE_FADE_OUT_FRAMES + MOBILE_BLACK_PAUSE_FRAMES + MOBILE_FADE_IN_FRAMES
-  : DESKTOP_FADE_OUT_FRAMES + DESKTOP_BLACK_PAUSE_FRAMES + DESKTOP_FADE_IN_FRAMES;
-const DESKTOP_DISSOLVE_STEP = 5;
-const DESKTOP_DISSOLVE_DOT_SIZE = 2;
-const MOBILE_DISSOLVE_STEP = 4;
-const MOBILE_DISSOLVE_DOT_SIZE = 1;
+  ? MOBILE_FADE_OUT_FRAMES
+  : DESKTOP_FADE_OUT_FRAMES;
 const MOBILE_SCENE_TRIGGER_CHARGE = 0.94;
 const MOBILE_CENTER_TRIGGER_RADIUS = 0.28;
 const DESKTOP_SCENE_TRIGGER_CHARGE = 0.9;
 const DESKTOP_CENTER_TRIGGER_RADIUS = 0.34;
-const REVEAL_SAMPLE_STEP = IS_MOBILE ? 3 : 3;
-const REVEAL_DOT_SIZE = IS_MOBILE ? 1 : 2;
 const MAX_CANVAS_WIDTH = IS_MOBILE ? 480 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 640 : 1867;
 const MOBILE_BLAST_SPRITE_FRAMES = 1;
 const MOBILE_STAMP_INK_PAD = 3;
-const ASSET_VERSION = "2026-05-13-unified-dissolve-mobile-1";
+const ASSET_VERSION = "2026-05-15-cleanup-1";
 
-const IMAGE_SRC = "cidade-dither.png";
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
   dither: `cidade_dither_${index + 1}.png`,
   phrase: `cidade_frase_${index + 1}.png`,
@@ -54,7 +42,6 @@ const FALLBACK_WIDTH = 640;
 const FALLBACK_HEIGHT = 512;
 const WHITE_THRESHOLD = 190;
 const ALPHA_WHITE_THRESHOLD = 190;
-const PHRASE_SRC = "cidade_frase.png";
 const POSTER_TEXT_GREEN = "#66f05f";
 
 const canvas = document.querySelector("#poster");
@@ -68,8 +55,6 @@ const phraseCanvas = document.createElement("canvas");
 const phraseCtx = phraseCanvas.getContext("2d", { willReadFrequently: true });
 const phraseGreenCanvas = document.createElement("canvas");
 const phraseGreenCtx = phraseGreenCanvas.getContext("2d", { willReadFrequently: true });
-const phraseWhiteCanvas = document.createElement("canvas");
-const phraseWhiteCtx = phraseWhiteCanvas.getContext("2d", { willReadFrequently: true });
 const coverageCanvas = document.createElement("canvas");
 const coverageCtx = coverageCanvas.getContext("2d", { willReadFrequently: true });
 
@@ -78,7 +63,6 @@ sourceCtx.imageSmoothingEnabled = false;
 baseCtx.imageSmoothingEnabled = false;
 phraseCtx.imageSmoothingEnabled = false;
 phraseGreenCtx.imageSmoothingEnabled = false;
-phraseWhiteCtx.imageSmoothingEnabled = false;
 coverageCtx.imageSmoothingEnabled = false;
 
 const state = {
@@ -114,6 +98,11 @@ function clamp(value, min, max) {
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
+}
+
+function hashUnit(x, y, salt) {
+  const value = Math.sin(x * 127.1 + y * 311.7 + salt * 17.3) * 43758.5453;
+  return value - Math.floor(value);
 }
 
 function shuffle(items) {
@@ -212,31 +201,6 @@ function applyScene(sceneIndex, ditherImg, phraseImg) {
   state.lastAffected = 0;
 }
 
-function loadImage() {
-  const img = new Image();
-
-  img.onload = () => {
-    const { width, height } = renderSizeForImage(img);
-
-    resizeCanvas(width, height);
-    buildFixedBitmapBase(img);
-    if (state.phraseImage) {
-      buildPhraseLayers(state.phraseImage);
-      state.phraseReady = true;
-    }
-    state.ready = true;
-    state.message = "";
-  };
-
-  img.onerror = () => {
-    resizeCanvas(FALLBACK_WIDTH, FALLBACK_HEIGHT);
-    state.ready = false;
-    state.message = "arquivo cidade-dither.png nao encontrado";
-  };
-
-  img.src = `${IMAGE_SRC}?v=${ASSET_VERSION}`;
-}
-
 function loadExplosionStamps() {
   for (const src of EXPLOSION_STAMP_SRCS) {
     const img = new Image();
@@ -252,25 +216,11 @@ function loadExplosionStamps() {
   }
 }
 
-function loadPhraseImage() {
-  const img = new Image();
-
-  img.onload = () => {
-    state.phraseImage = img;
-    buildPhraseLayers(img);
-    state.phraseReady = true;
-  };
-
-  img.src = `${PHRASE_SRC}?v=${ASSET_VERSION}`;
-}
-
 function buildPhraseLayers(img) {
   phraseCanvas.width = state.width;
   phraseCanvas.height = state.height;
   phraseGreenCanvas.width = state.width;
   phraseGreenCanvas.height = state.height;
-  phraseWhiteCanvas.width = state.width;
-  phraseWhiteCanvas.height = state.height;
 
   const source = document.createElement("canvas");
   const sourceCtx = source.getContext("2d", { willReadFrequently: true });
@@ -282,7 +232,6 @@ function buildPhraseLayers(img) {
   const sourcePixels = sourceCtx.getImageData(0, 0, source.width, source.height);
   const blackLayer = phraseCtx.createImageData(state.width, state.height);
   const greenLayer = phraseGreenCtx.createImageData(state.width, state.height);
-  const whiteLayer = phraseWhiteCtx.createImageData(state.width, state.height);
 
   const scale = Math.min(state.width / source.width, state.height / source.height);
   const drawW = Math.round(source.width * scale);
@@ -317,20 +266,13 @@ function buildPhraseLayers(img) {
       greenLayer.data[targetIndex + 1] = green.g;
       greenLayer.data[targetIndex + 2] = green.b;
       greenLayer.data[targetIndex + 3] = 255;
-
-      whiteLayer.data[targetIndex] = 255;
-      whiteLayer.data[targetIndex + 1] = 255;
-      whiteLayer.data[targetIndex + 2] = 255;
-      whiteLayer.data[targetIndex + 3] = 255;
     }
   }
 
   phraseCtx.clearRect(0, 0, state.width, state.height);
   phraseGreenCtx.clearRect(0, 0, state.width, state.height);
-  phraseWhiteCtx.clearRect(0, 0, state.width, state.height);
   phraseCtx.putImageData(blackLayer, 0, 0);
   phraseGreenCtx.putImageData(greenLayer, 0, 0);
-  phraseWhiteCtx.putImageData(whiteLayer, 0, 0);
   buildPhraseCoverageMap(blackLayer);
 }
 
@@ -1118,17 +1060,11 @@ function startSceneTransition() {
     ditherImg: null,
     phraseImg: null,
     finalCanvas: null,
-    revealCanvas: null,
-    revealCtx: null,
-    whiteRevealCells: [],
-    blackRevealCells: [],
-    whiteRevealIndex: 0,
-    blackRevealIndex: 0,
     currentDissolvePoints: [],
-    nextDissolvePoints: [],
     dissolveCanvas: null,
     dissolveCtx: null,
     dissolveEraseIndex: 0,
+    finalStampCanvas: null,
     mobileReadablePhrase: false,
     mobileGreenHoldCanvas: null,
     greenHoldCanvas: null,
@@ -1152,168 +1088,51 @@ function startSceneTransition() {
   });
 }
 
-function setupWhiteRevealTransition(transition) {
-  const revealCanvas = document.createElement("canvas");
-  const revealCtx = revealCanvas.getContext("2d", { alpha: false });
-
-  revealCanvas.width = state.width;
-  revealCanvas.height = state.height;
-  revealCtx.imageSmoothingEnabled = false;
-  revealCtx.fillStyle = "#000";
-  revealCtx.fillRect(0, 0, state.width, state.height);
-
-  transition.revealCanvas = revealCanvas;
-  transition.revealCtx = revealCtx;
-  transition.whiteRevealCells = buildWhiteRevealCells();
-  transition.blackRevealCells = buildBlackRevealCells(transition.finalCanvas);
-  transition.whiteRevealIndex = 0;
-  transition.blackRevealIndex = 0;
-}
-
-function buildWhiteRevealCells() {
-  const cells = [];
-
-  for (let y = 0; y < state.height; y += REVEAL_SAMPLE_STEP) {
-    for (let x = 0; x < state.width; x += REVEAL_SAMPLE_STEP) {
-      cells.push({
-        x,
-        y,
-        w: REVEAL_DOT_SIZE,
-        h: REVEAL_DOT_SIZE,
-      });
-    }
-  }
-
-  return shuffle(cells);
-}
-
-function buildBlackRevealCells(finalCanvas) {
-  const finalCtx = finalCanvas.getContext("2d", { willReadFrequently: true });
-  const pixels = finalCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height).data;
-  const cells = [];
-
-  for (let y = 0; y < finalCanvas.height; y += REVEAL_SAMPLE_STEP) {
-    for (let x = 0; x < finalCanvas.width; x += REVEAL_SAMPLE_STEP) {
-      const pixelIndex = (y * finalCanvas.width + x) * 4;
-      const isBlack = pixels[pixelIndex] < 128;
-      if (!isBlack) continue;
-
-      cells.push({
-        x,
-        y,
-        w: REVEAL_DOT_SIZE,
-        h: REVEAL_DOT_SIZE,
-      });
-    }
-  }
-
-  return shuffle(cells);
-}
-
-function drawWhiteRevealTransition(transition, localFrame) {
-  const whiteDuration = Math.max(1, Math.round(REORGANIZE_DURATION * 0.5));
-  const blackDuration = Math.max(1, REORGANIZE_DURATION - whiteDuration);
-  const whiteProgress = clamp(localFrame / whiteDuration, 0, 1);
-  const whiteTargetIndex = Math.floor(transition.whiteRevealCells.length * whiteProgress);
-
-  if (transition.revealCtx && whiteTargetIndex > transition.whiteRevealIndex) {
-    transition.revealCtx.fillStyle = "#fff";
-    for (let i = transition.whiteRevealIndex; i < whiteTargetIndex; i += 1) {
-      const cell = transition.whiteRevealCells[i];
-      transition.revealCtx.fillRect(cell.x, cell.y, cell.w, cell.h);
-    }
-    transition.whiteRevealIndex = whiteTargetIndex;
-  }
-
-  if (localFrame >= whiteDuration && transition.revealCtx) {
-    const blackFrame = localFrame - whiteDuration;
-    const blackProgress = clamp(blackFrame / blackDuration, 0, 1);
-    const blackTargetIndex = Math.floor(transition.blackRevealCells.length * blackProgress);
-
-    transition.revealCtx.fillStyle = "#000";
-    for (let i = transition.blackRevealIndex; i < blackTargetIndex; i += 1) {
-      const cell = transition.blackRevealCells[i];
-      transition.revealCtx.fillRect(cell.x, cell.y, cell.w, cell.h);
-    }
-    transition.blackRevealIndex = blackTargetIndex;
-  }
-
-  if (localFrame >= REORGANIZE_DURATION - 1 && transition.finalCanvas) {
-    ctx.drawImage(transition.finalCanvas, 0, 0);
-    return;
-  }
-
-  ctx.drawImage(transition.revealCanvas, 0, 0);
-}
-
-function dissolveStep() {
-  return IS_MOBILE ? MOBILE_DISSOLVE_STEP : DESKTOP_DISSOLVE_STEP;
-}
-
-function dissolveDotSize() {
-  return IS_MOBILE ? MOBILE_DISSOLVE_DOT_SIZE : DESKTOP_DISSOLVE_DOT_SIZE;
+function backgroundDissolveBlockSize() {
+  return IS_MOBILE ? 18 : 28;
 }
 
 function fadeOutFrames() {
   return IS_MOBILE ? MOBILE_FADE_OUT_FRAMES : DESKTOP_FADE_OUT_FRAMES;
 }
 
-function blackPauseFrames() {
-  return IS_MOBILE ? MOBILE_BLACK_PAUSE_FRAMES : DESKTOP_BLACK_PAUSE_FRAMES;
-}
-
-function fadeInFrames() {
-  return IS_MOBILE ? MOBILE_FADE_IN_FRAMES : DESKTOP_FADE_IN_FRAMES;
-}
-
 function setupDissolveTransition(transition) {
   const dissolveCanvas = document.createElement("canvas");
   const dissolveCtx = dissolveCanvas.getContext("2d", { alpha: false });
+  const finalStampCanvas = document.createElement("canvas");
+  const finalStampCtx = finalStampCanvas.getContext("2d", { alpha: true });
 
   dissolveCanvas.width = state.width;
   dissolveCanvas.height = state.height;
+  finalStampCanvas.width = state.width;
+  finalStampCanvas.height = state.height;
   dissolveCtx.imageSmoothingEnabled = false;
+  finalStampCtx.imageSmoothingEnabled = false;
   dissolveCtx.drawImage(baseCanvas, 0, 0);
   if (state.phraseReady) {
     dissolveCtx.drawImage(phraseCanvas, 0, 0);
+  }
+  if (transition.blastHoldCanvas) {
+    finalStampCtx.drawImage(transition.blastHoldCanvas, 0, 0);
+  }
+  if (transition.greenHoldCanvas) {
+    finalStampCtx.drawImage(transition.greenHoldCanvas, 0, 0);
   }
 
   transition.dissolveCanvas = dissolveCanvas;
   transition.dissolveCtx = dissolveCtx;
   transition.dissolveEraseIndex = 0;
+  transition.finalStampCanvas = finalStampCanvas;
   transition.currentDissolvePoints = shuffle(collectCurrentDissolvePoints());
-  transition.nextDissolvePoints = shuffle(collectTargetDissolvePoints(transition.finalCanvas));
 }
 
 function collectCurrentDissolvePoints() {
   const points = [];
-
-  const step = dissolveStep();
-  const size = dissolveDotSize();
+  const step = backgroundDissolveBlockSize();
 
   for (let y = 0; y < state.height; y += step) {
     for (let x = 0; x < state.width; x += step) {
-      if (state.whiteMask[y * state.width + x] !== 1) continue;
-      points.push({ x, y, size });
-    }
-  }
-
-  return points;
-}
-
-function collectTargetDissolvePoints(finalCanvas) {
-  const finalCtx = finalCanvas.getContext("2d", { willReadFrequently: true });
-  const pixels = finalCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height).data;
-  const points = [];
-
-  const step = dissolveStep();
-  const size = dissolveDotSize();
-
-  for (let y = 0; y < finalCanvas.height; y += step) {
-    for (let x = 0; x < finalCanvas.width; x += step) {
-      const pixelIndex = (y * finalCanvas.width + x) * 4;
-      if (pixels[pixelIndex] < 128) continue;
-      points.push({ x, y, size });
+      points.push({ x, y, size: step });
     }
   }
 
@@ -1330,8 +1149,6 @@ function drawDissolveTransition(transition, localFrame) {
   ctx.fillRect(0, 0, state.width, state.height);
 
   const outFrames = fadeOutFrames();
-  const pauseFrames = blackPauseFrames();
-  const inFrames = fadeInFrames();
 
   if (localFrame < outFrames) {
     const progress = clamp(localFrame / outFrames, 0, 1);
@@ -1340,35 +1157,21 @@ function drawDissolveTransition(transition, localFrame) {
       transition.dissolveCtx.fillStyle = "#000";
       for (let i = transition.dissolveEraseIndex; i < eraseCount; i += 1) {
         const point = transition.currentDissolvePoints[i];
-        transition.dissolveCtx.fillRect(point.x, point.y, dissolveStep(), dissolveStep());
+        transition.dissolveCtx.fillRect(point.x, point.y, point.size, point.size);
       }
       transition.dissolveEraseIndex = eraseCount;
     }
     if (transition.dissolveCanvas) {
       ctx.drawImage(transition.dissolveCanvas, 0, 0);
     }
-    if (transition.blastHoldCanvas) {
-      ctx.drawImage(transition.blastHoldCanvas, 0, 0);
-    }
-    if (transition.greenHoldCanvas) {
-      ctx.drawImage(transition.greenHoldCanvas, 0, 0);
+    if (transition.finalStampCanvas) {
+      ctx.drawImage(transition.finalStampCanvas, 0, 0);
     }
     return;
   }
 
-  if (localFrame < outFrames + pauseFrames) return;
-
-  const appearFrame = localFrame - outFrames - pauseFrames;
-  const progress = clamp(appearFrame / inFrames, 0, 1);
-  const visibleCount = Math.floor(transition.nextDissolvePoints.length * progress);
-  ctx.fillStyle = "#fff";
-  drawDissolvePoints(transition.nextDissolvePoints, visibleCount);
-}
-
-function drawDissolvePoints(points, count) {
-  for (let i = 0; i < count; i += 1) {
-    const point = points[i];
-    ctx.fillRect(point.x, point.y, point.size, point.size);
+  if (transition.finalCanvas) {
+    ctx.drawImage(transition.finalCanvas, 0, 0);
   }
 }
 
@@ -1520,24 +1323,46 @@ function drawChargeFeedback(now) {
   const scale = stampScale();
   const cx = state.charging.x;
   const cy = state.charging.y;
-  const blocks = 4 + Math.round(charge * 18);
-  const unit = 5 * scale;
+  const readyCharge = IS_MOBILE ? MOBILE_SCENE_TRIGGER_CHARGE : DESKTOP_SCENE_TRIGGER_CHARGE;
+  const ready = charge >= readyCharge;
+  const tick = Math.floor(now / 90);
+  const radius = Math.round(lerp(11, IS_MOBILE ? 27 : 34, charge) * scale);
+  const finalPush = clamp((charge - 0.78) / 0.22, 0, 1);
+  const dot = Math.max(1, Math.round((ready ? 2 : 1 + finalPush * 0.6) * scale));
+  const dots = Math.round(lerp(IS_MOBILE ? 22 : 28, IS_MOBILE ? 50 : 66, charge) + finalPush * (IS_MOBILE ? 38 : 54));
+  const density = lerp(0.88, ready ? 1 : 0.96, charge);
+  const pulse = ready && tick % 2 === 0 ? scale : 0;
 
   ctx.fillStyle = "#fff";
-  ctx.fillRect(cx - unit, cy - unit, unit * 2, unit * 2);
 
-  // Feedback de carga sem circulo de raio: so blocos duros acumulando no ponto.
-  for (let i = 0; i < blocks; i += 1) {
-    const row = Math.floor(i / 6);
-    const col = i % 6;
-    const jitterX = ((Math.round(now / 90) + i) % 2) * scale;
-    const jitterY = ((Math.round(now / 130) + i) % 2) * scale;
-    ctx.fillRect(
-      Math.round(cx - unit * 3 + col * unit + jitterX),
-      Math.round(cy + unit * 2 + row * unit + jitterY),
-      unit,
-      unit,
-    );
+  // Reticula de carga: pontos brancos secos que tremem e adensam, sem circulo
+  // de raio visivel. A distribuicao por ruido evita a cara de grid tecnico.
+  ctx.fillRect(Math.round(cx - dot - pulse), Math.round(cy - dot - pulse), dot * 2 + pulse * 2, dot * 2 + pulse * 2);
+
+  for (let i = 0; i < dots; i += 1) {
+    const angle = hashUnit(i, 4, 1) * Math.PI * 2;
+    const distance = Math.sqrt(hashUnit(i, 9, 2)) * radius;
+    const noise = hashUnit(i, tick, ready ? 12 : 5);
+    if (!ready && noise > density) continue;
+
+    const drift = ready ? 0 : (hashUnit(i, tick, 7) - 0.5) * 4 * scale;
+    const crushX = (hashUnit(i, 14, tick) - 0.5) * radius * 0.28 * charge;
+    const crushY = (hashUnit(i, 21, tick) - 0.5) * radius * 0.18 * charge;
+    const x = Math.round(cx + Math.cos(angle) * distance + crushX + drift);
+    const y = Math.round(cy + Math.sin(angle) * distance + crushY - drift);
+
+    ctx.fillRect(x, y, dot, dot);
+  }
+
+  if (ready) {
+    const arm = Math.round(6 * scale);
+    const unit = Math.max(1, scale);
+    ctx.fillRect(Math.round(cx - arm), Math.round(cy), arm * 2, unit);
+    ctx.fillRect(Math.round(cx), Math.round(cy - arm), unit, arm * 2);
+    ctx.fillRect(Math.round(cx - arm * 0.55), Math.round(cy - arm * 0.55), unit, unit);
+    ctx.fillRect(Math.round(cx + arm * 0.55), Math.round(cy - arm * 0.55), unit, unit);
+    ctx.fillRect(Math.round(cx - arm * 0.55), Math.round(cy + arm * 0.55), unit, unit);
+    ctx.fillRect(Math.round(cx + arm * 0.55), Math.round(cy + arm * 0.55), unit, unit);
   }
 }
 
