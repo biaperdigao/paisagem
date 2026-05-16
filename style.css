@@ -153,30 +153,32 @@ body {
 @media (max-width: 760px), (pointer: coarse) {
   .poster-stage {
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: minmax(0, auto) auto auto;
-    gap: 7px 12px;
+    grid-template-rows: auto auto auto;
+    gap: 5px 10px;
     align-content: center;
-    padding: 8px 16px max(12px, env(safe-area-inset-bottom));
+    padding: 8px 8px max(6px, env(safe-area-inset-bottom));
   }
 
   #poster {
     grid-column: 1 / -1;
     grid-row: 1;
-    width: min(100%, 480px);
-    max-height: calc(100svh - 82px);
+    width: min(100%, 560px);
+    max-width: none;
+    max-height: calc(100svh - 48px);
     align-self: center;
     justify-self: center;
   }
 
   .capture-button {
     grid-column: 1 / -1;
-    grid-row: 2;
+    grid-row: 3;
     justify-self: center;
     align-self: center;
-    width: 72px;
-    min-height: 22px;
-    padding: 4px 6px;
-    font-size: 8px;
+    margin-top: 4px;
+    width: 58px;
+    min-height: 16px;
+    padding: 5px 4px;
+    font-size: 6px;
     box-shadow:
       1px 0 0 #000,
       -1px 0 0 #000,
@@ -194,21 +196,24 @@ body {
 
   .poster-credit,
   .poster-description {
-    grid-row: 3;
+    grid-row: 2;
     align-self: start;
+    text-align: right;
     margin: 0;
-    font-size: 6.5px;
-    line-height: 1.12;
+    font-size: 4.8px;
+    line-height: 1.08;
   }
 
   .poster-credit {
     grid-column: 1;
     justify-self: start;
+    text-align: left;
   }
 
   .poster-description {
     grid-column: 2;
     justify-self: end;
-    max-width: 17ch;
+    max-width: 18ch;
+    text-align: right;
   }
 }

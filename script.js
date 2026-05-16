@@ -27,7 +27,7 @@ const MOBILE_STAMP_INK_PAD = 3;
 const CAPTURE_DELAY_MS = 200;
 const CAPTURE_HISTORY_MS = 700;
 const CAPTURE_SAMPLE_MS = 100;
-const ASSET_VERSION = "2026-05-16-final-ui-7";
+const ASSET_VERSION = "2026-05-16-final-ui-11";
 
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
   dither: `cidade_dither_${index + 1}.png`,
@@ -1078,8 +1078,6 @@ function startSceneTransition() {
     dissolveCtx: null,
     dissolveEraseIndex: 0,
     finalStampCanvas: null,
-    mobileReadablePhrase: false,
-    mobileGreenHoldCanvas: null,
     greenHoldCanvas: null,
     blastHoldCanvas: null,
     ready: false,
@@ -1436,7 +1434,7 @@ function rememberCaptureFrame(now) {
 async function shareOrDownloadBlob(blob) {
   const file = new File([blob], `paisagem-${Date.now()}.png`, { type: "image/png" });
 
-  if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+  if (IS_MOBILE && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
     try {
       await navigator.share({
         files: [file],
@@ -1539,7 +1537,6 @@ function releaseCharge(event) {
   ) {
     startSceneTransition();
     if (state.transition) {
-      state.transition.mobileReadablePhrase = true;
       state.transition.greenHoldCanvas = buildGreenHoldCanvas();
     }
   }

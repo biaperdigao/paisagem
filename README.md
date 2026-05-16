@@ -1,49 +1,36 @@
-# Window Fireworks
+# paisagem
 
-An interactive poster sketch where a prepared city/window image throws off sampled-pixel fireworks, waits, and rebuilds itself.
+Poster interativo em HTML, CSS e JavaScript puro, feito com Canvas 2D.
 
-## Step 1: Run It
+A paisagem de Belo Horizonte aparece em bitmap/dither 1-bit, sobreposta com excertos de poemas de Ana Martins Marques. Ao pressionar ou tocar a imagem, uma explosao branca em forma de carimbo revela a frase em verde. Um toque longo no centro troca a paisagem: a imagem de fundo dissolve em blocos secos enquanto o carimbo permanece, depois corta para a proxima cena.
 
-Start a local server from this folder:
+## Rodar localmente
 
 ```bash
-python3 -m http.server 4173
+python3 -m http.server 8060 --bind 127.0.0.1
 ```
 
-Then open:
+Abra:
 
 ```text
-http://127.0.0.1:4173
+http://127.0.0.1:8060/
 ```
 
-## Step 2: Load Your Image
+## Controles
 
-Use **Load image** and choose the photo from outside your window. For now, prepare the source image however you want before loading it: halftone, mosaic, posterized, high contrast, etc.
+- Clique ou toque: cria uma explosao.
+- Pressionar e segurar: carrega o tamanho da explosao.
+- Pressionar e segurar no centro ate o maximo: troca a cena.
+- `C`: captura o estado do canvas de aproximadamente 0,2s antes.
+- `R`: reseta explosoes e transicao.
+- `D`: alterna debug.
 
-The sketch automatically crops the image to fill the poster canvas and samples real pixels from it when you click.
+No mobile, a captura tenta abrir o compartilhamento nativo para salvar a imagem. No desktop, baixa um PNG.
 
-## Step 3: Perform Fireworks
+## Arquivos esperados
 
-Click or tap anywhere in the image. Each click creates a separate firework:
+- `cidade_dither_1.png` a `cidade_dither_12.png`
+- `cidade_frase_1.png` a `cidade_frase_12.png`
+- `cidade_explosion_1.png` a `cidade_explosion_7.png`
 
-1. pixels near the clicked spot are sampled from the source image
-2. sampled pixels pop from the clicked point
-3. they burst as mostly white, gold, coral, and pale blue streaks
-4. after a pause, they return to their original positions
-
-You can click multiple times before previous fireworks finish.
-
-## Step 4: First Things To Tune
-
-Most of the visual behavior lives in `script.js`.
-
-- `radius` inside `triggerBurst`: size of the destroyed/source area
-- `step` inside `triggerBurst`: particle density
-- `burstDuration`: how long the explosion travels
-- `holdDuration`: how long sparks linger before returning
-- `returnDuration`: how long pixels take to rebuild
-- `fireColor`: warm/white color mapping
-
-## Current Direction
-
-The sketch is intentionally simple and local: no build tools, no dependencies, and no image uploads to the internet. Next likely steps are color controls, export/recording, better smoke/glow, and a softer image-disruption effect that does not turn into a black hole.
+Nao ha frameworks, build step ou dependencias externas.
