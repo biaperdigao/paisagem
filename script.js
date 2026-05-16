@@ -27,7 +27,7 @@ const MOBILE_STAMP_INK_PAD = 3;
 const CAPTURE_DELAY_MS = 200;
 const CAPTURE_HISTORY_MS = 700;
 const CAPTURE_SAMPLE_MS = 100;
-const ASSET_VERSION = "2026-05-16-final-ui-6";
+const ASSET_VERSION = "2026-05-16-final-ui-7";
 
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
   dither: `cidade_dither_${index + 1}.png`,
@@ -1433,6 +1433,29 @@ function rememberCaptureFrame(now) {
   state.captureFrames = state.captureFrames.filter((frame) => frame.time >= oldestTime);
 }
 
+async function shareOrDownloadBlob(blob) {
+  const file = new File([blob], `paisagem-${Date.now()}.png`, { type: "image/png" });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: "paisagem",
+      });
+      return;
+    } catch (error) {
+      if (error && error.name === "AbortError") return;
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function captureDelayedFrame() {
   const targetTime = performance.now() - CAPTURE_DELAY_MS;
   const fallback = state.captureFrames[state.captureFrames.length - 1];
@@ -1441,13 +1464,7 @@ function captureDelayedFrame() {
 
   source.toBlob((blob) => {
     if (!blob) return;
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `paisagem-${Date.now()}.png`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    shareOrDownloadBlob(blob);
   }, "image/png");
 }
 
