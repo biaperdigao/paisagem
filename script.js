@@ -4,6 +4,7 @@ const MAX_BLAST_RADIUS = IS_MOBILE ? 1040 : 3600;
 const MAX_CHARGE_TIME = 1600;
 const MIN_BLAST_DURATION = 40;
 const MAX_BLAST_DURATION = 160;
+const DESKTOP_BLAST_EXTRA_FRAMES = 12;
 const RETURN_SLOWNESS = 1.25;
 const JITTER_DENSITY = IS_MOBILE ? 0.16 : 0.35;
 const SCENE_COUNT = 12;
@@ -23,7 +24,10 @@ const MAX_CANVAS_WIDTH = IS_MOBILE ? 480 : 1400;
 const MAX_CANVAS_HEIGHT = IS_MOBILE ? 640 : 1867;
 const MOBILE_BLAST_SPRITE_FRAMES = 1;
 const MOBILE_STAMP_INK_PAD = 3;
-const ASSET_VERSION = "2026-05-15-cleanup-1";
+const CAPTURE_DELAY_MS = 200;
+const CAPTURE_HISTORY_MS = 700;
+const CAPTURE_SAMPLE_MS = 100;
+const ASSET_VERSION = "2026-05-16-final-ui-6";
 
 const SCENES = Array.from({ length: SCENE_COUNT }, (_, index) => ({
   dither: `cidade_dither_${index + 1}.png`,
@@ -45,6 +49,7 @@ const ALPHA_WHITE_THRESHOLD = 190;
 const POSTER_TEXT_GREEN = "#66f05f";
 
 const canvas = document.querySelector("#poster");
+const captureButton = document.querySelector("#capture-button");
 const ctx = canvas.getContext("2d", { alpha: false });
 
 const sourceCanvas = document.createElement("canvas");
@@ -86,6 +91,8 @@ const state = {
   coverageHeight: 0,
   transition: null,
   charging: null,
+  captureFrames: [],
+  lastCaptureSampleAt: 0,
 };
 
 function random(min, max) {
@@ -135,6 +142,8 @@ function resizeCanvas(width, height) {
   canvas.width = width;
   canvas.height = height;
   canvas.style.aspectRatio = `${width} / ${height}`;
+  state.captureFrames = [];
+  state.lastCaptureSampleAt = 0;
   ctx.imageSmoothingEnabled = false;
 }
 
@@ -440,6 +449,10 @@ function canvasPoint(event) {
   };
 }
 
+function isInsideCanvas(point) {
+  return point.x >= 0 && point.x < state.width && point.y >= 0 && point.y < state.height;
+}
+
 function collectAffectedPixels(cx, cy, radius, maxDisplacement, duration) {
   const affected = [];
   const minX = Math.max(0, Math.round(cx - radius));
@@ -492,7 +505,7 @@ function durationFromCharge(charge) {
   if (IS_MOBILE) {
     return 96;
   }
-  return Math.round(lerp(MIN_BLAST_DURATION, MAX_BLAST_DURATION, charge));
+  return Math.round(lerp(MIN_BLAST_DURATION, MAX_BLAST_DURATION, charge)) + DESKTOP_BLAST_EXTRA_FRAMES;
 }
 
 function triggerBlast(x, y, charge) {
@@ -1403,9 +1416,45 @@ function reset() {
   state.charging = null;
 }
 
+function rememberCaptureFrame(now) {
+  if (now - state.lastCaptureSampleAt < CAPTURE_SAMPLE_MS) return;
+
+  const frameCanvas = document.createElement("canvas");
+  const frameCtx = frameCanvas.getContext("2d", { alpha: false });
+  frameCanvas.width = state.width;
+  frameCanvas.height = state.height;
+  frameCtx.imageSmoothingEnabled = false;
+  frameCtx.drawImage(canvas, 0, 0);
+
+  state.captureFrames.push({ time: now, canvas: frameCanvas });
+  state.lastCaptureSampleAt = now;
+
+  const oldestTime = now - CAPTURE_HISTORY_MS;
+  state.captureFrames = state.captureFrames.filter((frame) => frame.time >= oldestTime);
+}
+
+function captureDelayedFrame() {
+  const targetTime = performance.now() - CAPTURE_DELAY_MS;
+  const fallback = state.captureFrames[state.captureFrames.length - 1];
+  const frame = [...state.captureFrames].reverse().find((item) => item.time <= targetTime) || fallback;
+  const source = frame ? frame.canvas : canvas;
+
+  source.toBlob((blob) => {
+    if (!blob) return;
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `paisagem-${Date.now()}.png`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, "image/png");
+}
+
 function animate(now) {
   if (!state.ready) {
     drawMessage();
+    rememberCaptureFrame(now);
     requestAnimationFrame(animate);
     return;
   }
@@ -1427,6 +1476,7 @@ function animate(now) {
   drawSceneTransition();
   drawChargeFeedback(now);
   drawDebug();
+  rememberCaptureFrame(now);
 
   requestAnimationFrame(animate);
 }
@@ -1434,8 +1484,10 @@ function animate(now) {
 function startCharge(event) {
   event.preventDefault();
   canvas.focus();
-  canvas.setPointerCapture(event.pointerId);
   const point = canvasPoint(event);
+  if (!isInsideCanvas(point)) return;
+
+  canvas.setPointerCapture(event.pointerId);
 
   state.charging = {
     pointerId: event.pointerId,
@@ -1495,10 +1547,14 @@ canvas.addEventListener("pointercancel", cancelCharge);
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 canvas.addEventListener("selectstart", (event) => event.preventDefault());
 canvas.addEventListener("dragstart", (event) => event.preventDefault());
+if (captureButton) {
+  captureButton.addEventListener("click", captureDelayedFrame);
+}
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "r" || event.key === "R") reset();
   if (event.key === "d" || event.key === "D") state.debug = !state.debug;
+  if (event.key === "c" || event.key === "C") captureDelayedFrame();
 });
 
 resizeCanvas(FALLBACK_WIDTH, FALLBACK_HEIGHT);
